@@ -19,6 +19,7 @@ git
 github-cli
 stow
 pacman-contrib
+tailscale
 
 # desktop
 niri
@@ -28,7 +29,8 @@ xdg-desktop-portal-gtk
 greetd
 matugen
 qt6ct
-ttf-fira-sans
+inter-font
+ttf-jetbrains-mono-nerd
 qt6-multimedia-ffmpeg
 cava
 alacritty
