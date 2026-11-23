@@ -16,6 +16,7 @@ trash-cli
 less
 neovim
 git
+github-cli
 stow
 pacman-contrib
 
