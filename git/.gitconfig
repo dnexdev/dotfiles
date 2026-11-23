@@ -7,6 +7,15 @@
 	format = ssh
 [init]
 	defaultBranch = main
+[url "git@github.com:"]
+	# clone/pull over https (works before your key is on GitHub), push over ssh
+	pushInsteadOf = https://github.com/
+[credential "https://github.com"]
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
 # machine-specific (signing key paths): written by install.sh, not tracked
 [include]
 	path = ~/.gitconfig.local
