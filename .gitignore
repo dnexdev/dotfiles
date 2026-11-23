@@ -3,3 +3,5 @@ niri/.config/niri/local.kdl
 # written by dms at runtime
 gtk/.config/gtk-*/dank-colors.css
 qt/.config/qt6ct/colors/
+# per-machine display layout/scale (dms Display settings writes this)
+niri/.config/niri/dms/outputs.kdl
