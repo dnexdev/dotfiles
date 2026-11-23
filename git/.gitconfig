@@ -1,0 +1,10 @@
+[user]
+	email = me@dnex.dev
+	name = nex
+	signingkey = /home/nex/.ssh/id_ed25519.pub
+[commit]
+	gpgsign = true
+[gpg]
+	format = ssh
+[init]
+	defaultBranch = main
