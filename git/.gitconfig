@@ -8,3 +8,5 @@
 	format = ssh
 [init]
 	defaultBranch = main
+[gpg "ssh"]
+	allowedSignersFile = /home/nex/.ssh/allowed_signers

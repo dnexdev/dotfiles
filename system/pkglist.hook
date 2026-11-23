@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = Updating dotfiles package lists
+When = PostTransaction
+Exec = /bin/sh - c ''d=/home/nex/dotfiles; h=$(cat /etc/hostname); pacman -Qqen > $d/pkglist-$h.txt; pacman -Qqem > $d/aur-$h.txt; chown nex:nex $d/*-$h.txt''
