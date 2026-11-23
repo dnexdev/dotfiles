@@ -29,7 +29,6 @@ matugen
 qt6-multimedia-ffmpeg
 cava
 alacritty
-kitty
 
 # audio
 pipewire
