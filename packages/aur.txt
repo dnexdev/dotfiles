@@ -4,3 +4,4 @@ dux-calendar-bin
 dux-files-bin
 dux-greeter-bin
 dux-search-bin
+kora-icon-theme

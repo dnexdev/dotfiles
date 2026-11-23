@@ -8,7 +8,7 @@ set -euo pipefail
 
 DOTS="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_PKGS=(zsh starship nvim git alacritty)
-LINUX_PKGS=(niri dms xdg wallpapers)
+LINUX_PKGS=(niri dms xdg wallpapers gtk qt)
 BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 
 DRY=0 YES=0 LINK_ONLY=0
@@ -284,6 +284,27 @@ git_setup() {
   fi
 }
 
+desktop_settings() { # gsettings that GTK/portals read on wayland (fonts, icons, cursor)
+  has gsettings || return 0
+  say "desktop settings (fonts, icons, cursor)"
+  local gs=(gsettings)
+  [[ -n ${DBUS_SESSION_BUS_ADDRESS:-} ]] || gs=(dbus-run-session -- gsettings) # from a tty
+  local kv k v
+  for kv in \
+    "font-name=Fira Sans Semi-Bold 11" \
+    "icon-theme=kora" \
+    "cursor-theme=Adwaita" \
+    "cursor-size=24" \
+    "color-scheme=prefer-dark" \
+    "text-scaling-factor=1.0" \
+    "font-antialiasing=grayscale" \
+    "font-hinting=slight"; do
+    k=${kv%%=*} v=${kv#*=}
+    [[ $v =~ ^[0-9.]+$ ]] || v="'$v'"
+    run "${gs[@]}" set org.gnome.desktop.interface "$k" "$v" || FAILED+=("gsettings $k")
+  done
+}
+
 if ((DRY)); then say "DRY RUN: nothing will change"; fi
 case $OS in
 arch) arch_setup ;;
@@ -292,6 +313,7 @@ mac) mac_setup ;;
 esac
 link_configs
 shell_setup
+if [[ $OS == arch || $OS == linux ]]; then desktop_settings; fi
 if [[ $OS == arch ]]; then
   arch_system
   NOTES+=("reboot (or log out) to land in the greeter")
