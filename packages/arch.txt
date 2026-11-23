@@ -27,6 +27,9 @@ xdg-desktop-portal-gnome
 xdg-desktop-portal-gtk
 greetd
 matugen
+qt6ct
+ttf-fira-sans
+papirus-icon-theme
 qt6-multimedia-ffmpeg
 cava
 alacritty
