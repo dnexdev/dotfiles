@@ -1,0 +1,11 @@
+dux-calendar-bin
+dux-calendar-bin-debug
+dux-files-bin
+dux-files-bin-debug
+dux-greeter-bin
+dux-greeter-bin-debug
+dux-search-bin
+dux-search-bin-debug
+yay-bin
+yay-bin-debug
+zen-browser-bin
