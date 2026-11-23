@@ -291,7 +291,8 @@ desktop_settings() { # gsettings that GTK/portals read on wayland (fonts, icons,
   [[ -n ${DBUS_SESSION_BUS_ADDRESS:-} ]] || gs=(dbus-run-session -- gsettings) # from a tty
   local kv k v
   for kv in \
-    "font-name=Fira Sans Semi-Bold 11" \
+    "font-name=Inter 11" \
+    "monospace-font-name=JetBrainsMono Nerd Font 11" \
     "icon-theme=kora" \
     "cursor-theme=Adwaita" \
     "cursor-size=24" \
