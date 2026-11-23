@@ -1,0 +1,14 @@
+ani-cli
+coursier
+debtap
+dux-calendar-bin
+dux-files-bin
+dux-greeter-bin
+dux-search-bin
+gcc-arm-none-eabi-bin
+librepods
+mangowm-git
+vscodium-bin
+yay
+yt-x-git
+zen-browser-bin
