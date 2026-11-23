@@ -1,0 +1,51 @@
+# Packages for every Arch machine. Edit by hand.
+# GPU drivers (nvidia/intel) and kernel headers are added automatically by install.sh.
+# Boot/kernel/filesystem bits (grub, snapper, linux, ...) come from archinstall, not here.
+# pkglist-<host>.txt is the auto-generated snapshot of what's actually installed:
+# diff against it to find packages worth promoting into this list.
+
+# shell + cli
+zsh
+zsh-autosuggestions
+zsh-completions
+zsh-syntax-highlighting
+starship
+zoxide
+eza
+trash-cli
+less
+neovim
+git
+stow
+pacman-contrib
+
+# desktop
+niri
+xwayland-satellite
+xdg-desktop-portal-gnome
+xdg-desktop-portal-gtk
+greetd
+matugen
+qt6-multimedia-ffmpeg
+cava
+alacritty
+kitty
+
+# audio
+pipewire
+pipewire-alsa
+pipewire-jack
+pipewire-pulse
+gst-plugin-pipewire
+libpulse
+wireplumber
+
+# hardware + services
+networkmanager
+bluez
+bluez-utils
+power-profiles-daemon
+cups
+cups-pk-helper
+system-config-printer
+ghostscript

@@ -1,0 +1,6 @@
+# AUR packages (installed with yay). yay itself is bootstrapped by install.sh.
+zen-browser-bin
+dux-calendar-bin
+dux-files-bin
+dux-greeter-bin
+dux-search-bin

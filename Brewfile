@@ -1,0 +1,12 @@
+# macOS packages: `brew bundle` (run by install.sh)
+brew "stow"
+brew "git"
+brew "less"
+brew "neovim"
+brew "starship"
+brew "zoxide"
+brew "eza"
+brew "zsh-autosuggestions"
+brew "zsh-syntax-highlighting"
+brew "zsh-completions"
+cask "alacritty"

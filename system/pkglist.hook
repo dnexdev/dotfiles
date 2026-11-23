@@ -1,3 +1,5 @@
+# Template: install.sh fills in @DOTS@ and @USER@ and copies it to /etc/pacman.d/hooks/.
+# Don't symlink this file directly.
 [Trigger]
 Operation = Install
 Operation = Remove
@@ -5,6 +7,6 @@ Type = Package
 Target = *
 
 [Action]
-Description = Updating dotfiles package lists
+Description = Updating dotfiles package lists...
 When = PostTransaction
-Exec = /bin/sh -c 'd=/home/nex/dotfiles; h=$(cat /etc/hostname); pacman -Qqen > $d/pkglist-$h.txt; pacman -Qqem > $d/aur-$h.txt; chown nex:nex $d/*-$h.txt'
+Exec = /bin/sh -c 'd=@DOTS@; h=$(uname -n); pacman -Qqen > $d/pkglist-$h.txt; pacman -Qqem > $d/aur-$h.txt; chown @USER@: $d/pkglist-$h.txt $d/aur-$h.txt'

@@ -39,7 +39,13 @@ ask() {
   case $a in [nN]*) return 1 ;; esac
 }
 has() { command -v "$1" >/dev/null 2>&1; }
-list() { grep -vE '^[[:space:]]*(#|$)' "$1" | awk '{print $1}'; } # strip comments/blanks
+list() { # strip comments/blanks; warn instead of failing if the file is missing
+  [[ -f $1 ]] || {
+    warn "missing ${1#"$DOTS"/}, skipping"
+    return 0
+  }
+  grep -vE '^[[:space:]]*(#|$)' "$1" | awk '{print $1}'
+}
 
 [[ $EUID -ne 0 ]] || {
   echo "run as your user, not root" >&2
@@ -212,8 +218,9 @@ arch_system() {
 
   say "services"
   if has dms-greeter; then
-    run sudo dms-greeter enable && run sudo systemctl enable greetd && run dms-greeter sync ||
-      FAILED+=("greeter setup")
+    # dms-greeter asks for sudo itself and refuses to run under sudo
+    run dms-greeter enable -y && run sudo systemctl enable greetd && run dms-greeter sync ||
+      FAILED+=("greeter setup (try: dms-greeter enable && dms-greeter sync)")
   fi
   if has tailscale; then run sudo systemctl enable --now tailscaled; fi
   if pacman -Q pacman-contrib >/dev/null 2>&1; then run sudo systemctl enable --now paccache.timer; fi
@@ -237,13 +244,21 @@ mac_setup() {
   run brew bundle --file "$DOTS/Brewfile" || FAILED+=("some Brewfile entries")
 }
 
+login_shell() { # what's actually set, not $SHELL (that only updates after re-login)
+  if [[ $OS == mac ]]; then
+    dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}'
+  else
+    getent passwd "$USER" | cut -d: -f7
+  fi
+}
+
 shell_setup() {
   local zsh
   zsh=$(command -v zsh || true)
-  [[ -n $zsh && ${SHELL:-} != */zsh ]] || return 0
-  say "default shell -> zsh"
+  [[ -n $zsh && "$(login_shell)" != */zsh ]] || return 0
+  say "default shell -> zsh (asks for your password)"
   grep -qx "$zsh" /etc/shells || run sudo sh -c "echo '$zsh' >> /etc/shells"
-  run chsh -s "$zsh"
+  run chsh -s "$zsh" || FAILED+=("login shell (run: chsh -s $zsh)")
 }
 
 git_setup() {
