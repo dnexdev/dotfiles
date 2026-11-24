@@ -22,12 +22,6 @@ return {
       { "b", "<cmd>lua require('spider').motion('b')<CR>", mode = { "n", "o", "x" } },
     },
   },
-  {
-    "Olical/conjure",
-    ft = { "racket", "scheme" },
-    lazy = true,
-    init = function() end,
-  },
   { "prisma/vim-prisma" },
   { "elkowar/yuck.vim" },
 }
