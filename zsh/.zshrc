@@ -74,3 +74,6 @@ for p in /usr/share/zsh/plugins /usr/share ~/.local/share/zsh/plugins /opt/homeb
   [[ -f $p/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
     source $p/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 done
+
+# opencode
+[[ -d $HOME/.opencode/bin ]] && export PATH=$HOME/.opencode/bin:$PATH
