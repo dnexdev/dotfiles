@@ -31,6 +31,9 @@ matugen
 qt6ct
 inter-font
 ttf-jetbrains-mono-nerd
+noto-fonts
+noto-fonts-cjk
+noto-fonts-emoji
 qt6-multimedia-ffmpeg
 cava
 alacritty
