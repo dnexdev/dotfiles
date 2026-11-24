@@ -222,6 +222,18 @@ arch_system() {
     run dms-greeter enable -y && run sudo systemctl enable greetd && run dms-greeter sync ||
       FAILED+=("greeter setup (try: dms-greeter enable && dms-greeter sync)")
   fi
+  # unlock the login keyring with the greetd password (apps like spotifast store keys there)
+  if pacman -Q gnome-keyring >/dev/null 2>&1 && [[ -f /etc/pam.d/greetd ]]; then
+    if ! grep -qE '^[[:space:]]*[^#[:space:]].*pam_gnome_keyring' /etc/pam.d/greetd; then
+      say "pam: gnome-keyring for greetd"
+      run sudo sh -c "printf '%s\n' \
+        'auth       optional     pam_gnome_keyring.so' \
+        'session    optional     pam_gnome_keyring.so auto_start' >> /etc/pam.d/greetd" ||
+        FAILED+=("keyring pam (add pam_gnome_keyring.so auth+session lines to /etc/pam.d/greetd)")
+    fi
+    run systemctl --user enable gnome-keyring-daemon.socket ||
+      FAILED+=("keyring socket (try: systemctl --user enable gnome-keyring-daemon.socket)")
+  fi
   if has tailscale; then run sudo systemctl enable --now tailscaled; fi
   if pacman -Q pacman-contrib >/dev/null 2>&1; then run sudo systemctl enable --now paccache.timer; fi
   run sudo systemctl enable --now fstrim.timer || true
