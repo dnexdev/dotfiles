@@ -49,6 +49,8 @@ mkinitcpio
 neovim
 networkmanager
 niri
+noto-fonts-cjk
+noto-fonts-emoji
 npm
 nvidia-open-dkms
 nvidia-utils

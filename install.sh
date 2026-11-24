@@ -8,7 +8,7 @@ set -euo pipefail
 
 DOTS="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_PKGS=(zsh starship nvim git alacritty)
-LINUX_PKGS=(niri dms xdg wallpapers gtk qt)
+LINUX_PKGS=(niri dms xdg wallpapers gtk qt fontconfig)
 BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 
 DRY=0 YES=0 LINK_ONLY=0
