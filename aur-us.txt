@@ -1,0 +1,9 @@
+dux-calendar-bin
+dux-files-bin
+dux-greeter-bin
+dux-search-bin
+kora-icon-theme
+spotifast
+vesktop-bin
+yay-bin
+zen-browser-bin
