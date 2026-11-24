@@ -6,6 +6,7 @@ dux-files-bin
 dux-greeter-bin
 dux-search-bin
 gcc-arm-none-eabi-bin
+kora-icon-theme
 librepods
 vscodium-bin
 yay

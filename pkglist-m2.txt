@@ -49,6 +49,7 @@ gvfs-mtp
 htop
 imagemagick
 inotify-tools
+inter-font
 iotop
 iwd
 jdk-openjdk

@@ -66,11 +66,11 @@ extract() {
 }
 
 
-for p in /usr/share/zsh/plugins /opt/homebrew/share; do
+for p in /usr/share/zsh/plugins /usr/share ~/.local/share/zsh/plugins /opt/homebrew/share; do
   [[ -f $p/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
     source $p/zsh-autosuggestions/zsh-autosuggestions.zsh
 done
-for p in /usr/share/zsh/plugins /opt/homebrew/share; do
+for p in /usr/share/zsh/plugins /usr/share ~/.local/share/zsh/plugins /opt/homebrew/share; do
   [[ -f $p/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
     source $p/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 done
