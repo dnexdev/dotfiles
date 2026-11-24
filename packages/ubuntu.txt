@@ -1,0 +1,31 @@
+# Packages for Ubuntu 24.04 (apt). Edit by hand.
+# Only used when you have sudo. Anything still missing afterwards (always: neovim, since
+# LazyVim needs >= 0.11 and noble has 0.9; starship, not packaged) is installed into
+# ~/.local from upstream release builds. Without sudo that covers zsh, the zsh plugins,
+# zoxide, eza, rg, fd, fzf, gh, starship and neovim; the rest is skipped.
+# On a graphical install, alacritty, fonts-inter and JetBrainsMono Nerd Font are added too.
+# niri/dms aren't packaged for Ubuntu: their configs are only linked if niri is already installed.
+
+# shell + cli
+zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
+zoxide
+eza
+trash-cli
+less
+git
+gh
+stow
+openssh-client
+
+# needed by the installer + LazyVim
+curl
+ca-certificates
+tar
+xz-utils
+unzip
+build-essential
+ripgrep
+fd-find
+fzf
