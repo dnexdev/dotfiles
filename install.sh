@@ -4,7 +4,7 @@
 #   ./install.sh --link      (re)link configs with stow
 #   ./install.sh -n          dry run: print what would happen
 #   ./install.sh -y          don't ask, answer yes to prompts
-#   ./install.sh --no-sudo   (ubuntu) don't use sudo: everything goes in ~/.local
+#   ./install.sh --no-sudo   (debian/ubuntu) don't use sudo: everything goes in ~/.local
 set -euo pipefail
 
 DOTS="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,16 +60,16 @@ Linux)
   OS=linux
   if [[ -f /etc/arch-release ]]; then
     OS=arch
-  elif [[ -r /etc/os-release ]] && (. /etc/os-release && [[ $ID == ubuntu ]]); then
-    OS=ubuntu
+  elif [[ -r /etc/os-release ]] && (. /etc/os-release && [[ $ID == debian || $ID == ubuntu ]]); then
+    OS=debian # debian and ubuntu: apt, or ~/.local without sudo
   fi
   ;;
 *) OS=other ;;
 esac
 
-# ubuntu can run without sudo; arch and mac assume it
+# debian/ubuntu can run without sudo (debian often has no sudo at all); arch and mac assume it
 SUDO=1
-if [[ $OS == ubuntu ]]; then
+if [[ $OS == debian ]]; then
   if ((NO_SUDO)) || ! has sudo; then
     SUDO=0
   elif ! sudo -n true 2>/dev/null && ! id -nG | grep -qwE 'sudo|admin'; then
@@ -117,11 +117,11 @@ restore_backup() {
 }
 
 # niri/dms configs + desktop gsettings: always on Arch, elsewhere only once niri is installed
-# (on a stock Ubuntu GNOME they'd just swap in fonts/icons that aren't there)
+# (on a stock Debian/Ubuntu GNOME they'd just swap in fonts/icons that aren't there)
 wants_desktop() {
   case $OS in
   arch) return 0 ;;
-  ubuntu | linux) has niri ;;
+  debian | linux) has niri ;;
   *) return 1 ;;
   esac
 }
@@ -311,7 +311,7 @@ graphical() { [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} || "$(systemctl get-default
 # --- user-local installs (~/.local), used when there's no sudo or apt's version won't do ---
 LOCAL_BIN="$HOME/.local/bin"
 
-fetch() { # url dest; stock ubuntu desktop has wget but not always curl
+fetch() { # url dest; stock debian/ubuntu desktops have wget but not always curl
   if has curl; then
     curl -fsSL "$1" -o "$2"
   elif has wget; then
@@ -387,7 +387,7 @@ nvim_ok() { # LazyVim needs 0.11+
   ((${major:-0} > 0 || ${minor:-0} >= 11))
 }
 
-install_nvim() { # ubuntu's 0.9 is too old for LazyVim
+install_nvim() { # apt's (0.9 on ubuntu 24.04, 0.10 on debian 13) is too old for LazyVim
   nvim_ok && return 0
   local arch url tmp dest="$HOME/.local/opt/nvim"
   case $(uname -m) in
@@ -468,15 +468,27 @@ install_nerd_font() {
   rm -rf "$tmp"
 }
 
-ubuntu_setup() {
-  (. /etc/os-release && [[ $VERSION_ID == 24.04 ]]) ||
-    warn "tested on Ubuntu 24.04, this is $(. /etc/os-release && echo "$PRETTY_NAME")"
+debian_setup() {
+  local id ver
+  id=$(. /etc/os-release && echo "$ID") ver=$(. /etc/os-release && echo "${VERSION_ID:-}")
+  [[ $id:$ver == ubuntu:24.04 || $id:$ver == debian:13 ]] ||
+    warn "tested on Debian 13 and Ubuntu 24.04, this is $(. /etc/os-release && echo "$PRETTY_NAME")"
   export PATH="$LOCAL_BIN:$PATH" # so `has` sees what we install below
 
+  # in the sudo group isn't proof: check once (may ask for the password), else go user-local
+  if ((SUDO && !DRY)) && ! sudo -n true 2>/dev/null; then
+    say "checking sudo (asks for your password)"
+    sudo -v || {
+      warn "sudo didn't work: installing into ~/.local instead"
+      SUDO=0
+    }
+  fi
+
   if ((SUDO)); then
-    say "packages (packages/ubuntu.txt)"
-    run sudo apt-get update
-    mapfile -t pkgs < <(list "$DOTS/packages/ubuntu.txt")
+    say "packages (packages/apt.txt)"
+    run sudo apt-get update || warn "apt-get update failed, using cached package lists"
+    mapfile -t pkgs < <(list "$DOTS/packages/apt.txt")
+    if [[ $id == debian ]]; then pkgs+=(starship); fi # not packaged on ubuntu 24.04
     if graphical; then pkgs+=(alacritty fonts-inter fontconfig); fi
     apt_install "${pkgs[@]}"
   else
@@ -549,7 +561,7 @@ shell_setup() {
   fi
   say "default shell -> zsh (asks for your password)"
   run chsh -s "$zsh" && return 0
-  if [[ $OS == ubuntu ]]; then bash_to_zsh "$zsh"; else FAILED+=("login shell (run: chsh -s $zsh)"); fi
+  if [[ $OS == debian ]]; then bash_to_zsh "$zsh"; else FAILED+=("login shell (run: chsh -s $zsh)"); fi
 }
 
 bash_to_zsh() { # can't change the login shell: have interactive bash hand over to zsh instead
@@ -614,7 +626,7 @@ desktop_settings() { # gsettings that GTK/portals read on wayland (fonts, icons,
 if ((DRY)); then say "DRY RUN: nothing will change"; fi
 case $OS in
 arch) arch_setup ;;
-ubuntu) ubuntu_setup ;;
+debian) debian_setup ;;
 mac) mac_setup ;;
 *) warn "unsupported OS ($OS): only linking configs" ;;
 esac
