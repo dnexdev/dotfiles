@@ -17,8 +17,12 @@
 /.local/share/keyrings
 /.local/share/pki
 // the dotfiles repo is shared with git and has per-machine files inside it (pkglist-<host>,
-// niri display layout); its configs reach ~ through stow symlinks, which sync as symlinks
-/dotfiles
+// niri display layout); its configs reach ~ through stow symlinks, which sync as symlinks.
+// Except its two gitignored parts, which only Syncthing shares: docs/ and private/ (private
+// ssh settings etc.). The ! lines must come before /dotfiles/*: the first match wins.
+!/dotfiles/docs
+!/dotfiles/private
+/dotfiles/*
 /.dotfiles-backup
 /.gitconfig.local
 // browser profiles: copying one while the browser runs corrupts it (use the browser's sync)

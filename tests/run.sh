@@ -549,13 +549,29 @@ t_S4_new_folders_get_30_day_versioning_unless_already_set() {
 t_S5_ignore_list_keeps_per_machine_state_out() {
   local f=$T/dots/syncthing/stignore p
   for p in /.local/state/syncthing /.config/syncthing /.ssh /.gnupg /.local/share/keyrings \
-    /dotfiles /.cache /.local/bin /.local/share/nvim /.zen /.config/dconf /.zsh_history node_modules target; do
+    '/dotfiles/*' /.cache /.local/bin /.local/share/nvim /.zen /.config/dconf /.zsh_history node_modules target; do
     grep -qxF -- "$p" "$f" || fail "stignore doesn't ignore $p" || return 1
   done
   # these must NOT be ignored: they are what the user wants mirrored
   for p in /code /Documents /Downloads /Projects /Pictures /notes; do
     ! grep -qxF -- "$p" "$f" || fail "stignore ignores $p" || return 1
   done
+}
+
+t_S7_private_and_docs_sync_but_stay_out_of_git() {
+  local f=$T/dots/syncthing/stignore inc
+  # Syncthing: first match wins, so the ! lines must come before /dotfiles/*
+  for inc in '!/dotfiles/docs' '!/dotfiles/private'; do
+    (($(grep -nxF -- "$inc" "$f" | cut -d: -f1) < $(grep -nxF '/dotfiles/*' "$f" | cut -d: -f1))) ||
+      fail "$inc missing or after /dotfiles/*" || return 1
+  done
+  (cd "$REPO" && git check-ignore -q docs/x.md && git check-ignore -q private/ssh_config) ||
+    fail "docs/ or private/ is not gitignored" || return 1
+  # the public ssh config pulls private settings in first, and names no user but nex
+  [[ $(grep -m1 '^Include' "$T/dots/ssh/.ssh/config") == 'Include ~/dotfiles/private/ssh_config' ]] ||
+    fail "ssh config doesn't include the private file first" || return 1
+  ! grep -E '^[[:space:]]*User[[:space:]]' "$T/dots/ssh/.ssh/config" | grep -vq 'User nex' ||
+    fail "a user name other than nex is in the public ssh config"
 }
 
 t_S6_pair_shares_the_home_folder() {
