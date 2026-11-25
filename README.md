@@ -1,11 +1,10 @@
 # dotfiles
 
-Arch Linux, Debian 13, Ubuntu 24.04 and Apple Silicon macOS.
+Supported OSes: Arch Linux, Debian 13, Ubuntu 24.04, Apple Silicon macOS.
 
-On Debian/Ubuntu you get the shell, neovim, git and alacritty setup; the niri/dms desktop is only linked if niri is already installed. No sudo? It notices (or pass `--no-sudo`) and installs zsh, neovim and the CLI tools into `~/.local` instead.
+zsh, nvim, git, alacritty, niri, dms
 
 ```sh
-git clone https://github.com/dnexdev/dotfiles ~/dotfiles && 
+git clone https://github.com/dnexdev/dotfiles ~/dotfiles
 bash ~/dotfiles/install.sh
-
-Tests: `tests/run.sh` (hermetic, stubs everything). How the installer's states fit together: `docs/state-machines.md`.
+```

@@ -25,7 +25,8 @@
 /dotfiles/*
 /.dotfiles-backup
 /.gitconfig.local
-// browser profiles: copying one while the browser runs corrupts it (use the browser's sync)
+// browser and mail profiles: copying one while the app runs corrupts it (use the app's
+// own sync; Thunderbird's IMAP mail re-downloads by itself)
 /.zen
 /.config/zen
 /.mozilla
@@ -33,11 +34,27 @@
 /.config/chromium
 /.config/google-chrome
 /.config/BraveSoftware
-// Evolution (GNOME mail/calendar): unused
+/.thunderbird
+/.config/thunderbird
 /.config/evolution
 /.local/share/evolution
-// (Thunderbird's profile IS synced, on purpose: only run it on one machine at a time, or
-// its databases get conflict copies)
+// Electron apps (Discord via Vesktop, VSCodium) rewrite their session databases nonstop
+// while running, and their Singleton* locks name the host: sync only the settings
+// (the ! exceptions come first, and the dirs ignore their contents (/*), not themselves, so
+// Syncthing still looks inside them)
+!/.config/vesktop/settings.json
+!/.config/vesktop/settings
+!/.config/vesktop/themes
+/.config/vesktop/*
+!/.config/VSCodium/User/settings.json
+!/.config/VSCodium/User/keybindings.json
+!/.config/VSCodium/User/snippets
+/.config/VSCodium/User/*
+!/.config/VSCodium/User
+/.config/VSCodium/*
+// editor extensions can ship CPU-specific binaries: reinstall them per machine
+/.vscode-oss
+/.config/*/Singleton*
 // toolchains installed by SDK installers (x86_64 vs arm64 binaries), and the ESP-IDF
 // checkout they come with (re-clone it: it's a 27k-file git repo)
 /.espressif
