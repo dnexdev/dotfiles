@@ -7,3 +7,8 @@ qt/.config/qt6ct/colors/
 niri/.config/niri/dms/outputs.kdl
 # editor/tool backups
 *.bak
+# pkglist-snapshot temp files (renamed into place; only left if it crashed)
+.snapshot.*
+# never commit anything from ~/.ssh except the tracked config
+ssh/.ssh/*
+!ssh/.ssh/config
