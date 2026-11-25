@@ -132,6 +132,7 @@
 // video frames: 25 GiB in 162k files (the scripts, clips and sheets next to them still sync)
 /code/mypip/video-scan-demo/rec
 /code/mypip/video-scan-demo/rec2
+/Projects/instcombine-instrumentor/thirdparty/llvm-project
 
 // ---- anywhere in ~: build output and dependencies (rebuilt per machine) ----
 
