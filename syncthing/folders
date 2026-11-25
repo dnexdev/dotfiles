@@ -1,0 +1,6 @@
+# Folders kept in sync between machines by Syncthing, one per line, relative to ~.
+# The folder ID is the name, so it must be the same on every machine.
+# Read by install.sh (creates them) and syncthing/pair.sh (shares them).
+code
+notes
+Documents
