@@ -805,6 +805,8 @@ sync_setup() { # Syncthing (M8): same folders, same folder IDs on every machine
     while IFS= read -r other; do
       [[ -n $other && $other != "$id" ]] || continue
       opath=$(syncthing cli config folders "$other" path get 2>/dev/null) || continue
+      # Syncthing keeps paths as typed: a folder added in the web UI as ~ is stored as "~"
+      case $opath in "~") opath=$HOME ;; "~/"*) opath=$HOME/${opath#"~/"} ;; esac
       opath=${opath%/}
       if [[ $opath == "$dir"/* || $dir == "$opath"/* || $opath == "$dir" ]]; then
         say "syncthing: folder '$other' ($opath) overlaps '$id': removing it from the config (files are kept)"
