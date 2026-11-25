@@ -12,3 +12,7 @@ niri/.config/niri/dms/outputs.kdl
 # never commit anything from ~/.ssh except the tracked config
 ssh/.ssh/*
 !ssh/.ssh/config
+
+# not in git: kept in sync between machines by Syncthing (see syncthing/stignore)
+docs/
+private/
