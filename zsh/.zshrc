@@ -28,7 +28,7 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 (( $+commands[starship] )) && eval "$(starship init zsh)"
 
 # aliases
-alias vim='nvim' v='nvim .'
+# alias vim='nvim' v='nvim .'
 alias cp='cp -i' mv='mv -i'
 alias ..='cd ..' ...='cd ../..' ....='cd ../../..'
 alias r='exec zsh'
