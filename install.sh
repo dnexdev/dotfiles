@@ -10,6 +10,7 @@ set -euo pipefail
 DOTS="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_PKGS=(zsh starship nvim git alacritty)
 LINUX_PKGS=(niri dms xdg wallpapers gtk qt fontconfig)
+SYNC_DIRS=(code notes Documents) # synced between machines by Syncthing (folder ID = dir name)
 BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 
 DRY=0 YES=0 LINK_ONLY=0 NO_SUDO=0
@@ -67,6 +68,7 @@ Linux)
 *) OS=other ;;
 esac
 
+<<<<<<< HEAD
 # debian/ubuntu can run without sudo (debian often has no sudo at all); arch and mac assume it
 SUDO=1
 if [[ $OS == debian ]]; then
@@ -76,6 +78,22 @@ if [[ $OS == debian ]]; then
     SUDO=0
   fi
 fi
+=======
+# Tailscale, Syncthing, sshd and the ssh host shortcuts only work for ME.
+# Anyone else gets everything except those.
+is_me() {
+  local a def=n hint="y/N"
+  if [[ $USER == nex ]]; then def=y hint="Y/n"; fi
+  if ((YES)); then
+    [[ $def == y ]]
+    return
+  fi
+  read -rp "are you nex? and if so, is this a machine you own? [$hint] " a
+  [[ ${a:-$def} == [yY]* ]]
+}
+ME=0
+if is_me; then ME=1; fi
+>>>>>>> 5a0e509 (file sync)
 
 move_to_backup() {
   [[ -e $HOME/$1 || -L $HOME/$1 ]] || return 0
@@ -156,7 +174,12 @@ link_pkgs() {
 
 link_configs() {
   local pkgs=("${COMMON_PKGS[@]}") p
-  if wants_desktop; then pkgs+=("${LINUX_PKGS[@]}"); fi
+  if [[ $OS == arch || $OS == linux ]]; then pkgs+=("${LINUX_PKGS[@]}"); fi
+  if ((ME)); then pkgs+=(ssh); fi
+  has stow || {
+    warn "stow not installed"
+    return 1
+  }
   say "linking: ${pkgs[*]}"
   local d
   for p in "${pkgs[@]}"; do
@@ -287,7 +310,19 @@ arch_system() {
     run systemctl --user enable gnome-keyring-daemon.socket ||
       FAILED+=("keyring socket (try: systemctl --user enable gnome-keyring-daemon.socket)")
   fi
-  if has tailscale; then run sudo systemctl enable --now tailscaled; fi
+  if ((ME)) && has tailscale; then
+    run sudo systemctl enable --now tailscaled
+  fi
+  if ((ME)) && has sshd && ask "Accept ssh logins on this machine (keys only, passwords only over Tailscale)?"; then
+    say "sshd"
+    run sudo install -Dm644 "$DOTS/system/sshd.conf" /etc/ssh/sshd_config.d/10-dotfiles.conf
+    if run sudo sshd -t; then
+      run sudo systemctl enable --now sshd && run sudo systemctl reload sshd || FAILED+=("sshd service")
+    else
+      run sudo rm -f /etc/ssh/sshd_config.d/10-dotfiles.conf
+      FAILED+=("sshd config (sshd -t rejected system/sshd.conf)")
+    fi
+  fi
   if pacman -Q pacman-contrib >/dev/null 2>&1; then run sudo systemctl enable --now paccache.timer; fi
   run sudo systemctl enable --now fstrim.timer || true
 }
@@ -536,6 +571,47 @@ mac_setup() {
   fi
   say "packages (Brewfile)"
   run brew bundle --file "$DOTS/Brewfile" || FAILED+=("some Brewfile entries")
+  if ((ME)); then NOTES+=("open the Tailscale app and sign in"); fi
+}
+
+sync_setup() { # Syncthing: same folders, same folder IDs on every machine
+  has syncthing || {
+    warn "syncthing not installed, skipping file sync"
+    return 0
+  }
+  say "syncthing (${SYNC_DIRS[*]})"
+  if [[ $OS == mac ]]; then
+    run brew services start syncthing || FAILED+=("syncthing (try: brew services start syncthing)")
+  else
+    run systemctl --user enable --now syncthing.service ||
+      FAILED+=("syncthing (try: systemctl --user enable --now syncthing)")
+    # keep user services (syncthing) running with nobody logged in, e.g. a box you only ssh into
+    run sudo loginctl enable-linger "$USER" || true
+  fi
+  local d ign
+  for d in "${SYNC_DIRS[@]}"; do
+    run mkdir -p "$HOME/$d"
+    ign="$HOME/$d/.stignore"
+    if [[ -e $ign && ! -L $ign ]]; then
+      warn "~/$d/.stignore exists and isn't from dotfiles, leaving it"
+    else
+      run ln -sfn "$DOTS/syncthing/stignore" "$ign"
+    fi
+  done
+  if ((DRY)); then
+    echo "   [dry] add syncthing folders: ${SYNC_DIRS[*]}"
+    return 0
+  fi
+  local i
+  for i in {1..30}; do # wait for the daemon's API
+    syncthing cli show system >/dev/null 2>&1 && break
+    sleep 1
+  done
+  for d in "${SYNC_DIRS[@]}"; do
+    syncthing cli config folders list 2>/dev/null | grep -qx "$d" && continue
+    syncthing cli config folders add --id "$d" --label "$d" --path "$HOME/$d" ||
+      FAILED+=("syncthing folder $d")
+  done
 }
 
 login_shell() { # what's actually set, not $SHELL (that only updates after re-login)
@@ -601,6 +677,29 @@ git_setup() {
   fi
 }
 
+connect_setup() { # join the tailnet, then hook this machine up to the Legion (ssh alias: us)
+  if [[ $OS != mac ]] && has tailscale && ! tailscale status >/dev/null 2>&1; then
+    say "joining the tailnet (open the link it prints)"
+    run sudo tailscale up || FAILED+=("tailscale (run: sudo tailscale up)")
+  fi
+  [[ $(uname -n) == us ]] && return 0 # this is the Legion
+  if ((DRY)); then
+    echo "   [dry] ssh-copy-id us"
+    echo "   [dry] $DOTS/syncthing/pair.sh us"
+    return 0
+  fi
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=5 us true 2>/dev/null &&
+    [[ -f $HOME/.ssh/id_ed25519.pub ]] &&
+    ask "Copy your ssh key to the Legion (asks for its password once)?"; then
+    say "ssh-copy-id us"
+    ssh-copy-id us || FAILED+=("ssh key to Legion (is it online? run: ssh-copy-id us)")
+  fi
+  if has syncthing && ssh -o BatchMode=yes -o ConnectTimeout=5 us true 2>/dev/null &&
+    ask "Pair Syncthing with the Legion?"; then
+    "$DOTS/syncthing/pair.sh" us || FAILED+=("syncthing pairing (run: $DOTS/syncthing/pair.sh us)")
+  fi
+}
+
 desktop_settings() { # gsettings that GTK/portals read on wayland (fonts, icons, cursor)
   has gsettings || return 0
   say "desktop settings (fonts, icons, cursor)"
@@ -631,13 +730,16 @@ mac) mac_setup ;;
 *) warn "unsupported OS ($OS): only linking configs" ;;
 esac
 link_configs
+if [[ -d $HOME/.ssh ]]; then run chmod 700 "$HOME/.ssh"; fi
 shell_setup
-if wants_desktop; then desktop_settings; fi
+if ((ME)); then sync_setup; fi
+if [[ $OS == arch || $OS == linux ]]; then desktop_settings; fi
 if [[ $OS == arch ]]; then
   arch_system
   NOTES+=("reboot (or log out) to land in the greeter")
 fi
 git_setup
+if ((ME)); then connect_setup; fi
 
 echo
 say "done"
