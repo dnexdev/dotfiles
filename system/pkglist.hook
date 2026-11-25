@@ -1,5 +1,6 @@
-# Template: install.sh fills in @DOTS@ and @USER@ and copies it to /etc/pacman.d/hooks/.
-# Don't symlink this file directly.
+# Template: install.sh fills in @DOTS@ and @USER@ and installs it to /etc/pacman.d/hooks/,
+# next to /usr/local/lib/dotfiles/pkglist-snapshot (from system/pkglist-snapshot).
+# Don't symlink this file directly. The snapshot runs as @USER@, never as root.
 [Trigger]
 Operation = Install
 Operation = Remove
@@ -9,4 +10,4 @@ Target = *
 [Action]
 Description = Updating dotfiles package lists...
 When = PostTransaction
-Exec = /bin/sh -c 'd=@DOTS@; h=$(uname -n); pacman -Qqen > $d/pkglist-$h.txt; pacman -Qqem > $d/aur-$h.txt; chown @USER@: $d/pkglist-$h.txt $d/aur-$h.txt'
+Exec = /usr/bin/runuser -u @USER@ -- /usr/local/lib/dotfiles/pkglist-snapshot @DOTS@

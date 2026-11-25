@@ -7,4 +7,3 @@ On Debian/Ubuntu you get the shell, neovim, git and alacritty setup; the niri/dm
 ```sh
 git clone https://github.com/dnexdev/dotfiles ~/dotfiles && 
 bash ~/dotfiles/install.sh
-```
