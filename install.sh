@@ -819,6 +819,10 @@ sync_setup() { # Syncthing (M8): same folders, same folder IDs on every machine
         continue
       }
     fi
+    # Syncthing deletes a removed folder's marker (.stfolder), and a folder removed above
+    # may have had this same path (e.g. a "~" added in the web UI): without the marker this
+    # folder refuses to scan ("folder marker missing"). $dir is certainly the right place.
+    [[ -e $dir/.stfolder ]] || mkdir "$dir/.stfolder" || FAILED+=("syncthing marker $dir/.stfolder")
     # versioning: a file deleted or overwritten by the other machine is kept for 30 days in
     # <folder>/.stversions instead of being gone. Left alone if you chose another kind.
     st=$(syncthing cli config folders "$id" versioning type get 2>/dev/null || true)
