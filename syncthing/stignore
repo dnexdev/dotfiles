@@ -1,0 +1,25 @@
+// Syncthing ignore patterns, from dotfiles/syncthing/stignore.
+// install.sh symlinks this to .stignore in every synced folder (~/code, ~/notes, ~/Documents).
+// The machines are different architectures (x86_64 / arm64), so build output never syncs:
+// each machine builds its own.
+
+// build output
+target
+build
+dist
+*.o
+*.so
+*.pyc
+
+// dependencies / environments
+node_modules
+.venv
+venv
+__pycache__
+.direnv
+.mise
+
+// OS / editor junk ((?d) lets syncthing delete it if it blocks a directory removal)
+(?d).DS_Store
+(?d)Thumbs.db
+*.swp
