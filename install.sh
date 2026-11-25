@@ -72,7 +72,7 @@ case "$(uname -s)" in
 Darwin) OS=mac ;;
 Linux)
   OS=linux
-  if [[ -f /etc/arch-release ]]; then
+  if [[ -f $ARCH_RELEASE ]]; then
     OS=arch
   elif [[ -r /etc/os-release ]] && (. /etc/os-release && [[ $ID == debian || $ID == ubuntu ]]); then
     OS=debian # debian and ubuntu: apt, or ~/.local without sudo
@@ -252,10 +252,10 @@ link_pkgs() {
 
 link_configs() {
   local all=("${COMMON_PKGS[@]}") ok=() pkgs=() p bad
-  if [[ $OS == arch || $OS == linux ]]; then all+=("${LINUX_PKGS[@]}"); fi
+  if wants_desktop; then all+=("${LINUX_PKGS[@]}"); fi
   if ((ME)); then all+=("${PERSONAL_PKGS[@]}"); fi
-  if ! has stow && ! ((DRY)); then # (a dry run never installed it, so just show the plan)
-    warn "stow not installed"
+  if ! has stow && ! ((DRY)) && ! has realpath; then # link_pkgs falls back to link_tree
+    warn "neither stow nor realpath is installed"
     return 1
   fi
   for p in "${all[@]}"; do
@@ -273,7 +273,7 @@ link_configs() {
       FAILED+=("$p not linked: couldn't clear or create its directories in ~")
     fi
   done
-  if ((${#pkgs[@]})) && ! run stow -d "$DOTS" -t "$HOME" -R "${pkgs[@]}"; then
+  if ((${#pkgs[@]})) && ! link_pkgs "${pkgs[@]}"; then
     ((DRY)) || restore_backup
     warn "linking failed: see the conflicts above"
     return 1
@@ -670,9 +670,14 @@ debian_setup() {
     NOTES+=("tailscale isn't installed: curl -fsSL https://tailscale.com/install.sh | sh")
   fi
 }
+
 tailnet_up() { # log in to Tailscale if this machine isn't on the tailnet yet (Linux)
   [[ $OS != mac ]] && has tailscale || return 0
   tailscale status >/dev/null 2>&1 && return 0
+  if ((!SUDO)); then
+    NOTES+=("not on the tailnet: tailscale up needs root (ask an admin)")
+    return 0
+  fi
   say "joining the tailnet (open the link it prints)"
   run sudo tailscale up || FAILED+=("tailscale (run: sudo tailscale up)")
 }
@@ -744,56 +749,82 @@ mac_setup() {
 
 # ---------- personal: Syncthing (M8), git (M7), Legion (M10) ----------
 
-sync_setup() { # Syncthing: same folders, same folder IDs on every machine
+sync_setup() { # Syncthing (M8): same folders, same folder IDs on every machine
   has syncthing || {
     warn "syncthing not installed, skipping file sync"
     return 0
   }
-  local SYNC_DIRS=() d out
+  local ids=() paths=() out id rel i
   if ! out=$("$DOTS/syncthing/pair.sh" --folders); then # the one parser for syncthing/folders
     FAILED+=("syncthing/folders has a bad entry")
     return 0
   fi
-  while IFS= read -r d; do if [[ -n $d ]]; then SYNC_DIRS+=("$d"); fi; done <<<"$out"
-  ((${#SYNC_DIRS[@]})) || return 0
-  say "syncthing (${SYNC_DIRS[*]})"
+  while read -r id rel; do
+    [[ -n $id ]] || continue
+    ids+=("$id")
+    if [[ $rel == . ]]; then paths+=("$HOME"); else paths+=("$HOME/$rel"); fi
+  done <<<"$out"
+  ((${#ids[@]})) || return 0
+  say "syncthing (${ids[*]})"
   if [[ $OS == mac ]]; then
     run brew services start syncthing || FAILED+=("syncthing (try: brew services start syncthing)")
   else
     run systemctl --user enable --now syncthing.service ||
       FAILED+=("syncthing (try: systemctl --user enable --now syncthing)")
     # keep user services (syncthing) running with nobody logged in, e.g. a box you only ssh into
-    run sudo loginctl enable-linger "$USER" || true
+    if ((SUDO)); then run sudo loginctl enable-linger "$USER" || true; fi
   fi
-  local ign
-  for d in "${SYNC_DIRS[@]}"; do
-    ign="$HOME/$d/.stignore"
-    if ! run mkdir -p "$HOME/$d"; then
-      FAILED+=("~/$d (couldn't create it)")
+  local dir ign
+  for ((i = 0; i < ${#ids[@]}; i++)); do
+    dir=${paths[i]} ign=${paths[i]}/.stignore
+    if ! run mkdir -p "$dir"; then
+      FAILED+=("$dir (couldn't create it)")
     elif [[ -e $ign && ! -L $ign ]]; then
-      warn "~/$d/.stignore exists and isn't from dotfiles, leaving it"
+      warn "$ign exists and isn't from dotfiles, leaving it (compare with syncthing/stignore)"
     else
-      run ln -sfn "$DOTS/syncthing/stignore" "$ign" || FAILED+=("~/$d/.stignore link")
+      run ln -sfn "$DOTS/syncthing/stignore" "$ign" || FAILED+=("$ign link")
     fi
   done
   if ((DRY)); then
-    echo "   [dry] add syncthing folders: ${SYNC_DIRS[*]}"
+    echo "   [dry] add syncthing folders: ${ids[*]} (30-day versioning)"
     return 0
   fi
-  local i
   for i in {1..30}; do # wait for the daemon's API
     syncthing cli show system >/dev/null 2>&1 && break
     sleep 1
   done
-  local have
+  local have st other opath
   if ! have=$(syncthing cli config folders list 2>/dev/null); then
     FAILED+=("syncthing isn't responding, so no folders were added (re-run later)")
     return 0
   fi
-  for d in "${SYNC_DIRS[@]}"; do
-    grep -qxF -- "$d" <<<"$have" && continue
-    syncthing cli config folders add --id "$d" --label "$d" --path "$HOME/$d" ||
-      FAILED+=("syncthing folder $d")
+  for ((i = 0; i < ${#ids[@]}; i++)); do
+    id=${ids[i]} dir=${paths[i]}
+    # an existing folder inside this one (e.g. code, before the whole home was synced) would
+    # nest: drop it from Syncthing's config. Its files stay; the outer folder now covers them.
+    while IFS= read -r other; do
+      [[ -n $other && $other != "$id" ]] || continue
+      opath=$(syncthing cli config folders "$other" path get 2>/dev/null) || continue
+      opath=${opath%/}
+      if [[ $opath == "$dir"/* || $dir == "$opath"/* || $opath == "$dir" ]]; then
+        say "syncthing: folder '$other' ($opath) overlaps '$id': removing it from the config (files are kept)"
+        syncthing cli config folders "$other" delete || FAILED+=("syncthing: remove overlapping folder '$other' in the web UI")
+      fi
+    done <<<"$have"
+    if ! grep -qxF -- "$id" <<<"$have"; then
+      syncthing cli config folders add --id "$id" --label "$id" --path "$dir" || {
+        FAILED+=("syncthing folder $id")
+        continue
+      }
+    fi
+    # versioning: a file deleted or overwritten by the other machine is kept for 30 days in
+    # <folder>/.stversions instead of being gone. Left alone if you chose another kind.
+    st=$(syncthing cli config folders "$id" versioning type get 2>/dev/null || true)
+    if [[ -z $st ]]; then
+      syncthing cli config folders "$id" versioning type set trashcan &&
+        syncthing cli config folders "$id" versioning params set cleanoutDays 30 ||
+        FAILED+=("syncthing versioning for $id (set it in the web UI)")
+    fi
   done
 }
 
@@ -812,7 +843,10 @@ shell_setup() {
   # chsh only takes shells listed in /etc/shells, and adding one there needs sudo
   if ! grep -qx "$zsh" /etc/shells 2>/dev/null; then
     if ((SUDO)); then
-      run sudo sh -c "echo '$zsh' >> /etc/shells"
+      run sudo sh -c "echo '$zsh' >> /etc/shells" || {
+        FAILED+=("login shell (add $zsh to /etc/shells, then: chsh -s $zsh)")
+        return 0
+      }
     else
       bash_to_zsh "$zsh"
       return 0
@@ -835,13 +869,6 @@ bash_to_zsh() { # can't change the login shell: have interactive bash hand over 
   printf '\n%s\nif [[ $- == *i* && -x %q && "$(cat /proc/$PPID/comm 2>/dev/null)" != zsh ]]; then\n  SHELL=%q exec %q -l\nfi\n' \
     "$mark" "$1" "$1" "$1" >>"$rc"
   NOTES+=("~/.bashrc now hands interactive shells to zsh (login shell is still bash)")
-  if ! grep -qx "$zsh" /etc/shells; then
-    run sudo sh -c "echo '$zsh' >> /etc/shells" || {
-      FAILED+=("login shell (add $zsh to /etc/shells, then: chsh -s $zsh)")
-      return 0
-    }
-  fi
-  run chsh -s "$zsh" || FAILED+=("login shell (run: chsh -s $zsh)")
 }
 
 ssh_dir_in_repo() { # does ~/.ssh resolve into the repo? (then keys would land in git)
@@ -950,7 +977,7 @@ esac
 link_configs || FAILED+=("linking configs (fix the conflicts above, then: ./install.sh --link)")
 shell_setup
 if ((ME)); then sync_setup; fi
-if [[ $OS == arch || $OS == linux ]]; then desktop_settings; fi
+if wants_desktop; then desktop_settings; fi
 if [[ $OS == arch ]]; then
   arch_system
   NOTES+=("reboot (or log out) to land in the greeter")

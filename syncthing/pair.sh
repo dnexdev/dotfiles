@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # usage: syncthing/pair.sh HOST       pair this machine with HOST (an ssh alias: us or m2)
 #        syncthing/pair.sh --folders  print the synced folders (install.sh reads them this way)
-# Pairs the two machines in Syncthing and shares every folder in syncthing/folders both ways.
+# Pairs the two machines in Syncthing and shares every folder in syncthing/folders both ways
+# (by folder ID: "home" for ~).
 # Run install.sh on both machines first. Safe to re-run, and safe to run from both machines
 # at once. States and invariants: docs/state-machines.md, M9.
 set -euo pipefail
@@ -13,14 +14,29 @@ die() {
   exit 1
 }
 
-# the one parser for syncthing/folders: drop comments and blank lines, keep the first word,
-# and reject anything that isn't a plain relative path (it becomes a folder ID and ~/<path>)
+# the one parser for syncthing/folders. Prints "ID PATH" per folder, PATH relative to ~:
+#   ~      -> "home ."   (the whole home; then it must be the only entry)
+#   a/b    -> "a/b a/b"
+# Drops comments and blank lines, keeps the first word, and rejects anything that isn't a
+# plain relative path, and folders that overlap (one inside the other: they can't nest).
 folders() {
-  local f
-  grep -vE '^[[:space:]]*(#|$)' "$here/folders" | awk '{print $1}' | while IFS= read -r f; do
-    [[ $f =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ && $f != *..* ]] ||
-      die "bad entry in syncthing/folders: '$f'"
-    echo "$f"
+  local f g out=()
+  while IFS= read -r f; do
+    case $f in
+    "~" | "~/") f="~" ;;
+    *)
+      [[ $f =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ && $f != *..* && $f != . ]] ||
+        die "bad entry in syncthing/folders: '$f'"
+      ;;
+    esac
+    for g in ${out[@]+"${out[@]}"}; do
+      [[ $f == "~" || $g == "~" || $f == "$g" || $f == "$g"/* || $g == "$f"/* ]] &&
+        die "bad entry in syncthing/folders: '$f' and '$g' overlap (folders can't nest)"
+    done
+    out+=("$f")
+  done < <(grep -vE '^[[:space:]]*(#|$)' "$here/folders" | awk '{print $1}')
+  for f in ${out[@]+"${out[@]}"}; do
+    if [[ $f == "~" ]]; then echo "home ."; else echo "$f $f"; fi
   done
 }
 
@@ -32,7 +48,7 @@ fi
 host=${1:?usage: $0 HOST (an ssh alias: us or m2)}
 FOLDERS=()
 list=$(folders) || exit 1 # (not `< <(folders)`: that would hide a bad entry)
-while IFS= read -r f; do if [[ -n $f ]]; then FOLDERS+=("$f"); fi; done <<<"$list"
+while read -r f _; do if [[ -n $f ]]; then FOLDERS+=("$f"); fi; done <<<"$list" # IDs
 ((${#FOLDERS[@]})) || die "syncthing/folders lists no folders"
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
