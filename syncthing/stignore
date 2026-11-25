@@ -77,6 +77,18 @@
 /.opencode
 /.m2
 /.gradle
+/.sbt
+/.ivy2
+// conda / mamba environments are full of compiled packages
+/.local/mamba
+/.mamba
+/.conda
+/miniconda3
+/miniforge3
+/anaconda3
+// AUR helper checkouts and their build trees
+/yay
+/paru
 
 // ---- caches and per-machine app state (rebuilt or re-downloaded on their own) ----
 
