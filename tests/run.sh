@@ -537,6 +537,15 @@ t_S3_switching_to_home_drops_nested_folders_but_keeps_files() {
   [[ $(cat "$T/home/code/file") == work ]] || fail "files in the old folder were touched"
 }
 
+t_S3_old_folder_stored_as_tilde_is_dropped() {
+  # the web UI stores a folder added as "~" with the literal path "~", not /home/...
+  local_has_folders wbqxu-nqjne
+  echo "~" >"$T/st/local/path-wbqxu-nqjne"
+  printf '~\n' >"$T/dots/syncthing/folders"
+  run_install -y
+  rc_is 0 && local_folders_are "home "
+}
+
 t_S4_new_folders_get_30_day_versioning_unless_already_set() {
   local_has_folders notes
   echo staggered >"$T/st/local/vers-notes"
@@ -549,11 +558,11 @@ t_S4_new_folders_get_30_day_versioning_unless_already_set() {
 t_S5_ignore_list_keeps_per_machine_state_out() {
   local f=$T/dots/syncthing/stignore p
   for p in /.local/state/syncthing /.config/syncthing /.ssh /.gnupg /.local/share/keyrings \
-    '/dotfiles/*' /.cache /.local/bin /.local/share/nvim /.zen /.config/dconf /.zsh_history node_modules target; do
+    '/dotfiles/*' /.cache /.local/bin /.local/share/nvim /.zen /.config/zen /.mozilla /.config/mozilla /.config/evolution /.espressif /esp/esp-idf /.config/dconf /.zsh_history node_modules target; do
     grep -qxF -- "$p" "$f" || fail "stignore doesn't ignore $p" || return 1
   done
   # these must NOT be ignored: they are what the user wants mirrored
-  for p in /code /Documents /Downloads /Projects /Pictures /notes; do
+  for p in /code /Documents /Downloads /Projects /Pictures /notes /.config/thunderbird /.thunderbird; do
     ! grep -qxF -- "$p" "$f" || fail "stignore ignores $p" || return 1
   done
 }

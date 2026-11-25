@@ -27,11 +27,21 @@
 /.gitconfig.local
 // browser profiles: copying one while the browser runs corrupts it (use the browser's sync)
 /.zen
-/.mozilla
 /.config/zen
+/.mozilla
+/.config/mozilla
 /.config/chromium
 /.config/google-chrome
 /.config/BraveSoftware
+// Evolution (GNOME mail/calendar): unused
+/.config/evolution
+/.local/share/evolution
+// (Thunderbird's profile IS synced, on purpose: only run it on one machine at a time, or
+// its databases get conflict copies)
+// toolchains installed by SDK installers (x86_64 vs arm64 binaries), and the ESP-IDF
+// checkout they come with (re-clone it: it's a 27k-file git repo)
+/.espressif
+/esp/esp-idf
 // binary settings databases and session files that every running app rewrites
 /.config/dconf
 /.config/pulse
