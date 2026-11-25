@@ -442,7 +442,6 @@ arch_system() {
   run sudo systemctl enable --now fstrim.timer || true
 }
 
-<<<<<<< Updated upstream
 apt_install() {
   (($#)) || return 0
   local avail=() p
@@ -627,7 +626,7 @@ debian_setup() {
   export PATH="$LOCAL_BIN:$PATH" # so `has` sees what we install below
 
   # in the sudo group isn't proof: check once (may ask for the password), else go user-local
-  if ((SUDO && !DRY)) && ! sudo -n true 2>/dev/null; then
+  if ((SUDO && ! DRY)) && ! sudo -n true 2>/dev/null; then
     say "checking sudo (asks for your password)"
     sudo -v || {
       warn "sudo didn't work: installing into ~/.local instead"
@@ -888,8 +887,8 @@ git_setup() {
 
 # Legion (M10). States: batch-ok -> interactive-ok -> key copied + verified -> unreachable.
 # A failed BatchMode probe only means "no unlocked key": it isn't treated as unreachable.
-connect_setup() { # hook this machine up to the Legion (ssh alias: us)
-  tailnet_up # no-op on Arch (arch_system did it) and macOS (the app does it)
+connect_setup() {                       # hook this machine up to the Legion (ssh alias: us)
+  tailnet_up                            # no-op on Arch (arch_system did it) and macOS (the app does it)
   [[ $(short_host) == us ]] && return 0 # this is the Legion
   local pair=("$DOTS/syncthing/pair.sh" us)
   if ((DRY)); then
@@ -910,7 +909,7 @@ connect_setup() { # hook this machine up to the Legion (ssh alias: us)
       if ssh-copy-id -o ConnectTimeout=5 us && probe; then ok=1; fi
     fi
   fi
-  if ((!ok)); then
+  if ((! ok)); then
     FAILED+=("Legion (us) not reachable over ssh; when it is: ssh-copy-id us && ${pair[*]}")
   elif has syncthing && ask "Pair Syncthing with the Legion?"; then
     "${pair[@]}" || FAILED+=("syncthing pairing (run: ${pair[*]})")
