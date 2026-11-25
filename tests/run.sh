@@ -138,7 +138,10 @@ device-id) echo "ID-${SIDE:-local}" ;;
 "cli config folders add "*)
   id=$(arg --id "$@"); echo "$id" >>"$d/folders"; arg --path "$@" >"$d/path-$id" ;;
 "cli config folders "*" path get") cat "$d/path-$4" 2>/dev/null || echo "$HOME/$4" ;;
-"cli config folders "*" delete") grep -vx "$4" "$d/folders" >"$d/folders.new"; mv "$d/folders.new" "$d/folders" ;;
+"cli config folders "*" delete")
+  grep -vx "$4" "$d/folders" >"$d/folders.new"; mv "$d/folders.new" "$d/folders"
+  p=$(cat "$d/path-$4" 2>/dev/null || echo "$HOME/$4"); [[ $p == "~" ]] && p=$HOME
+  rm -rf "$p/.stfolder" ;;
 "cli config folders "*" versioning type get") cat "$d/vers-$4" 2>/dev/null; true ;;
 "cli config folders "*" versioning type set "*) echo "$8" >"$d/vers-$4" ;;
 "cli config folders "*" versioning params set "*) echo "$8=$9" >>"$d/vparams-$4" ;;
@@ -542,8 +545,10 @@ t_S3_old_folder_stored_as_tilde_is_dropped() {
   local_has_folders wbqxu-nqjne
   echo "~" >"$T/st/local/path-wbqxu-nqjne"
   printf '~\n' >"$T/dots/syncthing/folders"
+  mkdir "$T/home/.stfolder" # the fake syncthing deletes it with the "~" folder, like the real one
   run_install -y
-  rc_is 0 && local_folders_are "home "
+  rc_is 0 && local_folders_are "home " || return 1
+  [[ -d $T/home/.stfolder ]] || fail "folder marker ~/.stfolder missing after the migration"
 }
 
 t_S4_new_folders_get_30_day_versioning_unless_already_set() {
