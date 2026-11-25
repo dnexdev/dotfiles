@@ -1,7 +1,8 @@
 # Folders kept in sync between machines by Syncthing, one per line, relative to ~.
 # The folder ID is the name, so it must be the same on every machine.
 # Read by install.sh (creates them) and syncthing/pair.sh (shares them).
-code
-notes
-Documents
+#
+# ~ means your whole home, as one folder with ID "home". What it leaves out is in
+# syncthing/stignore (linked to ~/.stignore). With ~ listed, nothing else may be:
+# folders must not nest (the outer one would rescan everything the inner one writes).
 ~

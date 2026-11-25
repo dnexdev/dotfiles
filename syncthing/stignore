@@ -1,17 +1,114 @@
-// Syncthing ignore patterns, from dotfiles/syncthing/stignore.
-// install.sh symlinks this to .stignore in every synced folder (~/code, ~/notes, ~/Documents).
-// The machines are different architectures (x86_64 / arm64), so build output never syncs:
-// each machine builds its own.
+// Syncthing ignore list for the "home" folder (all of ~), from dotfiles/syncthing/stignore.
+// install.sh links ~/.stignore to this file. Everything NOT listed here is mirrored 1:1
+// between the machines. Patterns starting with / match only at the top of ~; the others
+// match at any depth. Why each group is here: docs/state-machines.md, M8.
+// (?d) = Syncthing may delete it when it's in the way of removing a directory.
 
-// build output
+// ---- MUST stay ignored (correctness, not just space) ----
+
+// Syncthing's own database and config: syncing them makes Syncthing rescan itself forever
+/.local/state/syncthing
+/.config/syncthing
+// secrets and identities are per machine (each has its own ssh key; the dotfiles repo
+// already shares ~/.ssh/config)
+/.ssh
+/.gnupg
+/.pki
+/.local/share/keyrings
+/.local/share/pki
+// the dotfiles repo is shared with git and has per-machine files inside it (pkglist-<host>,
+// niri display layout); its configs reach ~ through stow symlinks, which sync as symlinks
+/dotfiles
+/.dotfiles-backup
+/.gitconfig.local
+// browser profiles: copying one while the browser runs corrupts it (use the browser's sync)
+/.zen
+/.mozilla
+/.config/zen
+/.config/chromium
+/.config/google-chrome
+/.config/BraveSoftware
+// binary settings databases and session files that every running app rewrites
+/.config/dconf
+/.config/pulse
+/.local/state
+/.Xauthority
+/.ICEauthority
+/.xsession-errors*
+/.local/share/recently-used.xbel
+/.local/share/gvfs-metadata
+/.local/share/Trash
+
+// ---- programs built for one CPU: the Legion is x86_64, the M2 is arm64 ----
+
+/.local/bin
+/.local/lib
+/.local/opt
+/.local/share/nvim
+/.local/share/pnpm
+/.local/share/mise
+/.local/share/uv
+/.local/share/claude
+/.local/share/cursor-agent
+/.local/share/kiro-cli
+/.local/share/opencode
+/.cargo
+/.rustup
+/go
+/.npm
+/.bun
+/.deno
+/.nvm
+/.pyenv
+/.opencode
+/.m2
+/.gradle
+
+// ---- caches and per-machine app state (rebuilt or re-downloaded on their own) ----
+
+/.cache
+/.var
+/.steam
+/.local/share/Steam
+/.local/share/containers
+/.local/share/flatpak
+/.local/share/libvirt
+/.ollama
+/.nv
+/.java
+/.config/*/Cache
+/.config/*/CachedData
+/.config/*/Code Cache
+/.config/*/GPUCache
+/.config/*/DawnCache
+/.config/*/Crash Reports
+/.config/*/logs
+// AI coding agents: live session state, rewritten constantly by every running session
+/.claude
+/.claude.json*
+/.cursor
+/.kiro
+/.t3
+// shell and REPL history: both machines append at once, so they would conflict constantly
+/.zsh_history
+/.histfile
+/.bash_history
+/.python_history
+/.node_repl_history
+/.lesshst
+/.viminfo
+/.wget-hsts
+/.zcompdump*
+/.sudo_as_admin_successful
+
+// ---- anywhere in ~: build output and dependencies (rebuilt per machine) ----
+
 target
 build
 dist
 *.o
 *.so
 *.pyc
-
-// dependencies / environments
 node_modules
 .venv
 venv
@@ -19,7 +116,8 @@ __pycache__
 .direnv
 .mise
 
-// OS / editor junk ((?d) lets syncthing delete it if it blocks a directory removal)
+// ---- anywhere: OS / editor junk ----
+
 (?d).DS_Store
 (?d)Thumbs.db
 *.swp

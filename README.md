@@ -7,3 +7,5 @@ On Debian/Ubuntu you get the shell, neovim, git and alacritty setup; the niri/dm
 ```sh
 git clone https://github.com/dnexdev/dotfiles ~/dotfiles && 
 bash ~/dotfiles/install.sh
+
+Tests: `tests/run.sh` (hermetic, stubs everything). How the installer's states fit together: `docs/state-machines.md`.
