@@ -127,6 +127,12 @@
 /.zcompdump*
 /.sudo_as_admin_successful
 
+// ---- big project data not worth mirroring ----
+
+// video frames: 25 GiB in 162k files (the scripts, clips and sheets next to them still sync)
+/code/mypip/video-scan-demo/rec
+/code/mypip/video-scan-demo/rec2
+
 // ---- anywhere in ~: build output and dependencies (rebuilt per machine) ----
 
 target
