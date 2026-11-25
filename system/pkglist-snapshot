@@ -1,0 +1,28 @@
+#!/bin/sh
+# usage: pkglist-snapshot DOTS
+# Write pkglist-<host>.txt (repo packages) and aur-<host>.txt (foreign/AUR packages) into the
+# dotfiles repo at DOTS. install.sh copies this to /usr/local/lib/dotfiles/ and the pacman
+# hook (system/pkglist.hook) runs it after every transaction *as the user*, via runuser:
+# root never opens a path inside the user's repo, so a symlink planted there can't make
+# root overwrite anything. Each file is written to a temp file and renamed into place,
+# which replaces a symlink rather than writing through it.
+set -eu
+d=${1:?usage: pkglist-snapshot DOTS}
+[ "$(id -u)" -ne 0 ] || {
+  echo "pkglist-snapshot: refusing to run as root" >&2
+  exit 1
+}
+[ -d "$d" ] || {
+  echo "pkglist-snapshot: no such repo: $d" >&2
+  exit 1
+}
+h=$(uname -n)
+h=${h%%.*}
+tmp=""
+trap 'rm -f "$tmp"' EXIT
+for kind in pkglist aur; do
+  tmp=$(mktemp "$d/.snapshot.XXXXXX")
+  if [ "$kind" = pkglist ]; then pacman -Qqen >"$tmp"; else pacman -Qqem >"$tmp"; fi
+  mv -f "$tmp" "$d/$kind-$h.txt"
+  tmp=""
+done

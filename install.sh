@@ -6,12 +6,20 @@
 #   ./install.sh -y          don't ask, answer yes to prompts
 #   ./install.sh --no-sudo   (debian/ubuntu) don't use sudo: everything goes in ~/.local
 set -euo pipefail
+# Error handling: every step that can fail for an ordinary reason is guarded explicitly
+# (`|| FAILED+=(...)`) and the run continues to the summary. Don't rely on set -e for that:
+# bash ignores it inside any function called from if/!/&&/||. States, invariants and the
+# bugs these guards fix: docs/state-machines.md. Must stay bash 3.2-safe (macOS): no
+# mapfile/declare -A on shared paths, and guard possibly-empty arrays under set -u.
 
 DOTS="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMMON_PKGS=(zsh starship nvim git alacritty)
+COMMON_PKGS=(zsh starship nvim alacritty)
 LINUX_PKGS=(niri dms xdg wallpapers gtk qt fontconfig)
-SYNC_DIRS=(code notes Documents) # synced between machines by Syncthing (folder ID = dir name)
-BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
+PERSONAL_PKGS=(git ssh) # nex's git identity + ssh host aliases: only when ME=1
+# unique per run: two runs in the same second must not share (and restore) each other's backups
+BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)-$$"
+ARCH_RELEASE=${DOTFILES_ARCH_RELEASE:-/etc/arch-release} # (overridable for tests/run.sh)
+SNAPSHOT=/usr/local/lib/dotfiles/pkglist-snapshot
 
 DRY=0 YES=0 LINK_ONLY=0 NO_SUDO=0
 for arg in "$@"; do
@@ -21,7 +29,7 @@ for arg in "$@"; do
   --link) LINK_ONLY=1 ;;
   --no-sudo) NO_SUDO=1 ;;
   -h | --help)
-    sed -n '2,9p' "$0"
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
     exit 0
     ;;
   *)
@@ -31,7 +39,7 @@ for arg in "$@"; do
   esac
 done
 
-FAILED=() NOTES=()
+FAILED=() NOTES=() MOVED=() CREATED=()
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 run() { if ((DRY)); then printf '   [dry] %s\n' "$*"; else "$@"; fi; }
@@ -48,6 +56,11 @@ list() { # strip comments/blanks; warn instead of failing if the file is missing
     return 0
   }
   grep -vE '^[[:space:]]*(#|$)' "$1" | awk '{print $1}'
+}
+short_host() { # MagicDNS-style name: macOS says m2.local
+  local h
+  h=$(uname -n)
+  echo "${h%%.*}"
 }
 
 [[ $EUID -ne 0 ]] || {
@@ -68,7 +81,6 @@ Linux)
 *) OS=other ;;
 esac
 
-<<<<<<< HEAD
 # debian/ubuntu can run without sudo (debian often has no sudo at all); arch and mac assume it
 SUDO=1
 if [[ $OS == debian ]]; then
@@ -78,7 +90,6 @@ if [[ $OS == debian ]]; then
     SUDO=0
   fi
 fi
-=======
 # Tailscale, Syncthing, sshd and the ssh host shortcuts only work for ME.
 # Anyone else gets everything except those.
 is_me() {
@@ -92,46 +103,113 @@ is_me() {
   [[ ${a:-$def} == [yY]* ]]
 }
 ME=0
-if is_me; then ME=1; fi
->>>>>>> 5a0e509 (file sync)
+if is_me; then ME=1; else
+  NOTES+=("personal setup skipped (git identity, ssh hosts, Tailscale, Syncthing, sshd)")
+fi
+
+summary() { # print notes + failures; exit status says whether everything worked
+  echo
+  say "done"
+  for n in ${NOTES[@]+"${NOTES[@]}"}; do echo "  - $n"; done
+  if ((${#FAILED[@]})); then
+    warn "these didn't work:"
+    for f in ${FAILED[@]+"${FAILED[@]}"}; do echo "  - $f"; done
+    exit 1
+  fi
+  exit 0
+}
+
+# ---------- linking (M3, M4) ----------
 
 move_to_backup() {
   [[ -e $HOME/$1 || -L $HOME/$1 ]] || return 0
   say "backing up ~/$1"
-  run mkdir -p "$BACKUP/$(dirname "$1")"
-  run mv "$HOME/$1" "$BACKUP/$1"
+  run mkdir -p "$BACKUP/$(dirname "$1")" && run mv "$HOME/$1" "$BACKUP/$1" || return 1
+  if ! ((DRY)); then MOVED+=("$1"); fi
 }
 
-backup_conflicts() {
-  local pkg=$1 rel tgt acc part parts
+# put back exactly what this run moved (files, links, whole dirs, empty dirs), newest
+# first, after removing the dirs this run created in their place
+restore_backup() {
+  local i rel bad=0
+  for ((i = ${#CREATED[@]} - 1; i >= 0; i--)); do rmdir "$HOME/${CREATED[i]}" 2>/dev/null || true; done
+  for ((i = ${#MOVED[@]} - 1; i >= 0; i--)); do
+    rel=${MOVED[i]}
+    if [[ -e $HOME/$rel || -L $HOME/$rel ]] || ! mkdir -p "$HOME/$(dirname "$rel")" ||
+      ! mv "$BACKUP/$rel" "$HOME/$rel"; then
+      warn "couldn't restore ~/$rel (it's still in $BACKUP)"
+      bad=1
+    fi
+  done
+  if ((${#MOVED[@]})); then
+    if ((bad)); then FAILED+=("restoring backups: some files are still in $BACKUP"); else
+      warn "restored your original files"
+    fi
+  fi
+  MOVED=() CREATED=()
+}
+
+pkg_files() { (cd "$DOTS/$1" && find . \( -type f -o -type l \) -print | sed 's|^\./||'); }
+
+# foreign_parent PKG: print the first parent dir of PKG's files that is a symlink pointing
+# outside the repo (e.g. ~/.config -> /data/config). Stow can't link through it, and moving
+# it to the backup would take every other app's config with it, so the package is skipped.
+foreign_parent() {
+  local rel acc part parts
   while IFS= read -r rel; do
-    rel=${rel#./}
     acc=""
     IFS=/ read -ra parts <<<"$(dirname "$rel")"
-    for part in "${parts[@]}"; do
+    for part in ${parts[@]+"${parts[@]}"}; do
       [[ $part == . ]] && continue
       acc=${acc:+$acc/}$part
-      if [[ -L $HOME/$acc && "$(readlink -f "$HOME/$acc")" != "$DOTS/"* ]] || [[ -f $HOME/$acc ]]; then
-        move_to_backup "$acc"
+      if [[ -L $HOME/$acc && "$(readlink -f "$HOME/$acc")" != "$DOTS/"* ]]; then
+        echo "$acc"
+        return 0
+      fi
+    done
+  done < <(pkg_files "$1")
+  return 1
+}
+
+backup_conflicts() { # returns 1 if something couldn't be moved
+  local pkg=$1 rel tgt acc part parts
+  while IFS= read -r rel; do
+    acc=""
+    IFS=/ read -ra parts <<<"$(dirname "$rel")"
+    for part in ${parts[@]+"${parts[@]}"}; do
+      [[ $part == . ]] && continue
+      acc=${acc:+$acc/}$part
+      if [[ -f $HOME/$acc && ! -L $HOME/$acc ]]; then # a file where a directory must go
+        move_to_backup "$acc" || return 1
         break
       fi
     done
     tgt="$HOME/$rel"
     [[ -e $tgt || -L $tgt ]] || continue
     [[ "$(readlink -f "$tgt" 2>/dev/null)" == "$DOTS/$pkg/$rel" ]] && continue
-    move_to_backup "$rel"
-  done < <(cd "$DOTS/$pkg" && find . \( -type f -o -type l \) -print)
+    move_to_backup "$rel" || return 1
+  done < <(pkg_files "$pkg")
 }
 
-restore_backup() {
-  [[ -d $BACKUP ]] || return 0
-  local rel
-  while IFS= read -r rel; do
-    rel=${rel#./}
-    mkdir -p "$HOME/$(dirname "$rel")"
-    mv "$BACKUP/$rel" "$HOME/$rel"
-  done < <(cd "$BACKUP" && find . \( -type f -o -type l \) -print)
-  warn "restored your original files"
+# ensure_dirs PKG: create PKG's top-level dirs in ~ as real dirs, so stow links the files
+# inside them instead of folding the whole dir into a symlink to the repo. Runs after
+# backup_conflicts, so a *file* in the way has already been moved. ~/.ssh is always a real
+# 0700 dir: folded, ssh-keygen would write private keys into the repo.
+ensure_dirs() {
+  local d
+  for d in "$DOTS/$1"/*/ "$DOTS/$1"/.*/; do
+    d=$(basename "$d")
+    [[ $d == . || $d == .. || $d == '*' || $d == '.*' ]] && continue
+    if [[ $d == .ssh && -L $HOME/.ssh && "$(readlink -f "$HOME/.ssh")" == "$DOTS/"* ]]; then
+      warn "~/.ssh was a link into the repo; making it a real directory (check ssh/.ssh/ for stray keys)"
+      run rm "$HOME/.ssh" || return 1
+    fi
+    [[ -L $HOME/$d || -d $HOME/$d ]] && continue
+    if [[ $d == .ssh ]]; then run mkdir -m 700 "$HOME/$d" || return 1; else
+      run mkdir -p "$HOME/$d" || return 1
+    fi
+    if ! ((DRY)); then CREATED+=("$d"); fi
+  done
 }
 
 # niri/dms configs + desktop gsettings: always on Arch, elsewhere only once niri is installed
@@ -173,40 +251,51 @@ link_pkgs() {
 }
 
 link_configs() {
-  local pkgs=("${COMMON_PKGS[@]}") p
-  if [[ $OS == arch || $OS == linux ]]; then pkgs+=("${LINUX_PKGS[@]}"); fi
-  if ((ME)); then pkgs+=(ssh); fi
-  has stow || {
+  local all=("${COMMON_PKGS[@]}") ok=() pkgs=() p bad
+  if [[ $OS == arch || $OS == linux ]]; then all+=("${LINUX_PKGS[@]}"); fi
+  if ((ME)); then all+=("${PERSONAL_PKGS[@]}"); fi
+  if ! has stow && ! ((DRY)); then # (a dry run never installed it, so just show the plan)
     warn "stow not installed"
     return 1
-  }
-  say "linking: ${pkgs[*]}"
-  local d
-  for p in "${pkgs[@]}"; do
+  fi
+  for p in "${all[@]}"; do
     [[ -d $DOTS/$p ]] || continue
-    for d in "$DOTS/$p"/*/ "$DOTS/$p"/.*/; do
-      d=$(basename "$d")
-      [[ $d == . || $d == .. || $d == '*' || $d == '.*' ]] && continue
-      [[ -L $HOME/$d || -d $HOME/$d ]] || run mkdir -p "$HOME/$d"
-    done
+    if bad=$(foreign_parent "$p"); then
+      warn "skipped $p: ~/$bad is a symlink outside dotfiles"
+      FAILED+=("$p not linked: ~/$bad is a symlink to $(readlink "$HOME/$bad"); link $p's files by hand")
+    else ok+=("$p"); fi
   done
-  for p in "${pkgs[@]}"; do if [[ -d $DOTS/$p ]]; then backup_conflicts "$p"; fi; done
-  if ! link_pkgs "${pkgs[@]}"; then
+  ((${#ok[@]})) || return 0
+  say "linking: ${ok[*]}"
+  # order matters: move conflicts (incl. a file where a dir goes) first, then create dirs
+  for p in "${ok[@]}"; do
+    if backup_conflicts "$p" && ensure_dirs "$p"; then pkgs+=("$p"); else
+      FAILED+=("$p not linked: couldn't clear or create its directories in ~")
+    fi
+  done
+  if ((${#pkgs[@]})) && ! run stow -d "$DOTS" -t "$HOME" -R "${pkgs[@]}"; then
     ((DRY)) || restore_backup
     warn "linking failed: see the conflicts above"
     return 1
   fi
-  if [[ -d $BACKUP ]]; then NOTES+=("old configs moved to $BACKUP"); fi
+  if [[ -d $HOME/.ssh && ! -L $HOME/.ssh ]]; then run chmod 700 "$HOME/.ssh" || true; fi
+  if ((${#MOVED[@]})); then NOTES+=("old configs moved to $BACKUP"); fi
   return 0
 }
 
 if ((LINK_ONLY)); then
-  link_configs
-  exit 0
+  link_configs || FAILED+=("linking configs (see the conflicts above)")
+  summary
 fi
+
+# ---------- Arch packages (M5) ----------
 
 pac_install() {
   (($#)) || return 0
+  if ((DRY)); then # the database refresh was only printed, so availability isn't known yet
+    run sudo pacman -S --needed --noconfirm "$@"
+    return 0
+  fi
   local avail=() p
   local -A repo=()
   while IFS= read -r p; do repo[$p]=1; done < <(pacman -Slq)
@@ -214,13 +303,14 @@ pac_install() {
     if [[ -n ${repo[$p]:-} ]]; then avail+=("$p"); else FAILED+=("$p (not in repos)"); fi
   done
   ((${#avail[@]})) || return 0
-  run sudo pacman -S --needed --noconfirm "${avail[@]}" && return 0
+  sudo pacman -S --needed --noconfirm "${avail[@]}" && return 0
   warn "batch install failed, retrying one at a time"
-  for p in "${avail[@]}"; do run sudo pacman -S --needed --noconfirm "$p" || FAILED+=("$p"); done
+  for p in "${avail[@]}"; do sudo pacman -S --needed --noconfirm "$p" || FAILED+=("$p"); done
 }
 
 aur_install() {
   (($#)) || return 0
+  has yay || ((DRY)) || return 0 # yay bootstrap failed: already reported
   run yay -S --needed --noconfirm "$@" && return 0
   warn "AUR batch failed, retrying one at a time"
   local p
@@ -231,25 +321,37 @@ gpu_vendor() { grep -qsx "$1" /sys/bus/pci/devices/*/vendor 2>/dev/null; } # 0x1
 
 arch_setup() {
   say "base tools"
-  run sudo pacman -S --needed --noconfirm git stow base-devel
+  # refresh the package databases (and upgrade) first. If that fails, install nothing: after a
+  # refresh that worked but an upgrade that didn't, `pacman -S` is a partial upgrade.
+  if ! run sudo pacman -Syu --needed --noconfirm git stow base-devel; then
+    FAILED+=("system upgrade (sudo pacman -Syu) failed, so no packages were installed; fix it and re-run")
+    return 0
+  fi
 
   if ! has yay; then
     say "installing yay"
-    local tmp
-    tmp=$(mktemp -d)
-    run git clone --depth 1 https://aur.archlinux.org/yay-bin.git "$tmp/yay-bin"
-    (cd "$tmp/yay-bin" && run makepkg -si --noconfirm)
-    rm -rf "$tmp"
+    if ((DRY)); then
+      echo "   [dry] build and install yay-bin from the AUR"
+    else
+      local tmp
+      tmp=$(mktemp -d)
+      git clone --depth 1 https://aur.archlinux.org/yay-bin.git "$tmp/yay-bin" &&
+        (cd "$tmp/yay-bin" && makepkg -si --noconfirm) ||
+        FAILED+=("yay (so AUR packages were skipped)")
+      rm -rf "$tmp"
+    fi
   fi
 
   # no -debug packages from makepkg
   if grep -qsE '^OPTIONS=.* debug' /etc/makepkg.conf; then
     say "disabling makepkg debug packages"
-    run sudo sed -i -E '/^OPTIONS=/s/ debug/ !debug/' /etc/makepkg.conf
+    run sudo sed -i -E '/^OPTIONS=/s/ debug/ !debug/' /etc/makepkg.conf ||
+      FAILED+=("makepkg.conf (set OPTIONS=... !debug by hand)")
   fi
 
   say "packages (packages/arch.txt)"
-  mapfile -t pkgs < <(list "$DOTS/packages/arch.txt")
+  local pkgs=() aur=() p
+  while IFS= read -r p; do pkgs+=("$p"); done < <(list "$DOTS/packages/arch.txt")
 
   if [[ $(uname -m) == x86_64 ]]; then
     if gpu_vendor 0x10de; then
@@ -263,11 +365,11 @@ arch_setup() {
     fi
     if gpu_vendor 0x8086; then pkgs+=(intel-media-driver vulkan-intel); fi
   fi
-  pac_install "${pkgs[@]}"
+  pac_install ${pkgs[@]+"${pkgs[@]}"}
 
   say "AUR packages (packages/aur.txt)"
-  mapfile -t aur < <(list "$DOTS/packages/aur.txt")
-  aur_install "${aur[@]}"
+  while IFS= read -r p; do aur+=("$p"); done < <(list "$DOTS/packages/aur.txt")
+  aur_install ${aur[@]+"${aur[@]}"}
 
   if ! pacman -Q dux-shell >/dev/null 2>&1; then
     warn "Dux Shell isn't installed (it comes from Dux's own installer, not the Arch repos)"
@@ -279,18 +381,35 @@ arch_setup() {
   fi
 }
 
-arch_system() {
+# ---------- Arch system (M6, M11) ----------
+
+# pacman hook (M11): runs system/pkglist-snapshot as $USER after each transaction. Root
+# only installs the hook + helper into /etc and /usr/local; it never writes into the repo.
+pkglist_hook() {
   say "pacman hook: keep pkglist-<host>.txt up to date"
-  run sudo mkdir -p /etc/pacman.d/hooks
-  run sudo rm -f /etc/pacman.d/hooks/pkglist.hook # never write through an old symlink
+  if [[ $DOTS =~ [^A-Za-z0-9._/-] ]]; then # it's substituted into the hook's Exec line
+    FAILED+=("pacman hook: move the repo to a path without spaces or special characters")
+    return 0
+  fi
   if ((DRY)); then
-    echo "   [dry] render system/pkglist.hook -> /etc/pacman.d/hooks/"
-  else sed -e "s|@DOTS@|$DOTS|g" -e "s|@USER@|$USER|g" "$DOTS/system/pkglist.hook" |
-    sudo tee /etc/pacman.d/hooks/pkglist.hook >/dev/null; fi
-  local h
-  h=$(uname -n)
-  run sh -c "pacman -Qqen > '$DOTS/pkglist-$h.txt'; pacman -Qqem > '$DOTS/aur-$h.txt'"
-  if pacman -Q zsh >/dev/null 2>&1; then run sudo pacman -D --asexplicit zsh >/dev/null; fi
+    echo "   [dry] install system/pkglist-snapshot -> $SNAPSHOT, system/pkglist.hook -> /etc/pacman.d/hooks/"
+  else
+    local hook
+    hook=$(mktemp)
+    sed -e "s|@DOTS@|$DOTS|g" -e "s|@USER@|$USER|g" "$DOTS/system/pkglist.hook" >"$hook" &&
+      sudo install -Dm755 "$DOTS/system/pkglist-snapshot" "$SNAPSHOT" &&
+      sudo install -Dm644 "$hook" /etc/pacman.d/hooks/pkglist.hook ||
+      FAILED+=("pacman hook (install system/pkglist.hook by hand)")
+    rm -f "$hook"
+  fi
+  run "$DOTS/system/pkglist-snapshot" "$DOTS" || FAILED+=("package snapshot (pkglist-$(short_host).txt)")
+}
+
+arch_system() {
+  pkglist_hook
+  if pacman -Q zsh >/dev/null 2>&1; then
+    run sudo pacman -D --asexplicit zsh >/dev/null || FAILED+=("mark zsh as explicitly installed")
+  fi
 
   say "services"
   if has dms-greeter; then
@@ -311,22 +430,19 @@ arch_system() {
       FAILED+=("keyring socket (try: systemctl --user enable gnome-keyring-daemon.socket)")
   fi
   if ((ME)) && has tailscale; then
-    run sudo systemctl enable --now tailscaled
+    run sudo systemctl enable --now tailscaled || FAILED+=("tailscaled service")
+    tailnet_up # before sshd: its password rule needs this machine's Tailscale address
   fi
   if ((ME)) && has sshd && ask "Accept ssh logins on this machine (keys only, passwords only over Tailscale)?"; then
-    say "sshd"
-    run sudo install -Dm644 "$DOTS/system/sshd.conf" /etc/ssh/sshd_config.d/10-dotfiles.conf
-    if run sudo sshd -t; then
-      run sudo systemctl enable --now sshd && run sudo systemctl reload sshd || FAILED+=("sshd service")
-    else
-      run sudo rm -f /etc/ssh/sshd_config.d/10-dotfiles.conf
-      FAILED+=("sshd config (sshd -t rejected system/sshd.conf)")
-    fi
+    sshd_setup
   fi
-  if pacman -Q pacman-contrib >/dev/null 2>&1; then run sudo systemctl enable --now paccache.timer; fi
+  if pacman -Q pacman-contrib >/dev/null 2>&1; then
+    run sudo systemctl enable --now paccache.timer || FAILED+=("paccache.timer")
+  fi
   run sudo systemctl enable --now fstrim.timer || true
 }
 
+<<<<<<< Updated upstream
 apt_install() {
   (($#)) || return 0
   local avail=() p
@@ -555,6 +671,50 @@ debian_setup() {
     NOTES+=("tailscale isn't installed: curl -fsSL https://tailscale.com/install.sh | sh")
   fi
 }
+tailnet_up() { # log in to Tailscale if this machine isn't on the tailnet yet (Linux)
+  [[ $OS != mac ]] && has tailscale || return 0
+  tailscale status >/dev/null 2>&1 && return 0
+  say "joining the tailnet (open the link it prints)"
+  run sudo tailscale up || FAILED+=("tailscale (run: sudo tailscale up)")
+}
+
+# sshd (M6): keys only. Passwords only for connections that arrive AT this machine's
+# Tailscale IPv4 address FROM a Tailscale address; see system/sshd.conf for why both
+# halves are needed and why IPv6 is left out. Installed as a transaction: if the new
+# config is rejected, the previous drop-in is put back and sshd is not reloaded.
+sshd_setup() {
+  say "sshd"
+  local dest=/etc/ssh/sshd_config.d/10-dotfiles.conf conf prev ip4 had=0
+  ip4=$(tailscale ip -4 2>/dev/null | head -n1 || true)
+  if ((DRY)); then
+    echo "   [dry] install system/sshd.conf${ip4:+ + passwords at $ip4 from the tailnet} -> $dest, enable sshd"
+    return 0
+  fi
+  conf=$(mktemp)
+  prev=$(mktemp)
+  cat "$DOTS/system/sshd.conf" >"$conf"
+  if [[ -n $ip4 ]]; then
+    printf '\n# added by install.sh: passwords only from the tailnet, to the Tailscale address\nMatch LocalAddress %s Address 100.64.0.0/10,!100.115.92.0/23\n    PasswordAuthentication yes\nMatch all\n' \
+      "$ip4" >>"$conf"
+  else
+    NOTES+=("ssh passwords stay off until Tailscale is up; then re-run install.sh")
+  fi
+  if sudo test -f "$dest" && sudo cat "$dest" >"$prev"; then had=1; fi
+  if sudo install -Dm644 "$conf" "$dest" && sudo sshd -t; then
+    sudo systemctl enable --now sshd && sudo systemctl reload sshd || FAILED+=("sshd service")
+  else
+    local back=0
+    if ((had)); then sudo install -m644 "$prev" "$dest" && back=1; else sudo rm -f "$dest" && back=1; fi
+    if ((back)) && sudo sshd -t; then
+      FAILED+=("sshd config rejected by sshd -t; the previous one is still in place")
+    else
+      FAILED+=("sshd config rejected AND rollback failed: fix $dest before restarting sshd")
+    fi
+  fi
+  rm -f "$conf" "$prev"
+}
+
+# ---------- macOS ----------
 
 mac_setup() {
   if ! has brew; then
@@ -565,8 +725,17 @@ mac_setup() {
     if ((DRY)); then
       echo "   [dry] install homebrew"
     else
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      eval "$(/opt/homebrew/bin/brew shellenv)"
+      # download first: `bash -c "$(curl ...)"` runs an empty script when curl fails
+      local inst
+      inst=$(mktemp)
+      curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$inst" &&
+        /bin/bash "$inst" || FAILED+=("homebrew install")
+      rm -f "$inst"
+      if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
+      has brew || {
+        FAILED+=("homebrew isn't available, so no packages were installed")
+        return 0
+      }
     fi
   fi
   say "packages (Brewfile)"
@@ -574,11 +743,20 @@ mac_setup() {
   if ((ME)); then NOTES+=("open the Tailscale app and sign in"); fi
 }
 
+# ---------- personal: Syncthing (M8), git (M7), Legion (M10) ----------
+
 sync_setup() { # Syncthing: same folders, same folder IDs on every machine
   has syncthing || {
     warn "syncthing not installed, skipping file sync"
     return 0
   }
+  local SYNC_DIRS=() d out
+  if ! out=$("$DOTS/syncthing/pair.sh" --folders); then # the one parser for syncthing/folders
+    FAILED+=("syncthing/folders has a bad entry")
+    return 0
+  fi
+  while IFS= read -r d; do if [[ -n $d ]]; then SYNC_DIRS+=("$d"); fi; done <<<"$out"
+  ((${#SYNC_DIRS[@]})) || return 0
   say "syncthing (${SYNC_DIRS[*]})"
   if [[ $OS == mac ]]; then
     run brew services start syncthing || FAILED+=("syncthing (try: brew services start syncthing)")
@@ -588,14 +766,15 @@ sync_setup() { # Syncthing: same folders, same folder IDs on every machine
     # keep user services (syncthing) running with nobody logged in, e.g. a box you only ssh into
     run sudo loginctl enable-linger "$USER" || true
   fi
-  local d ign
+  local ign
   for d in "${SYNC_DIRS[@]}"; do
-    run mkdir -p "$HOME/$d"
     ign="$HOME/$d/.stignore"
-    if [[ -e $ign && ! -L $ign ]]; then
+    if ! run mkdir -p "$HOME/$d"; then
+      FAILED+=("~/$d (couldn't create it)")
+    elif [[ -e $ign && ! -L $ign ]]; then
       warn "~/$d/.stignore exists and isn't from dotfiles, leaving it"
     else
-      run ln -sfn "$DOTS/syncthing/stignore" "$ign"
+      run ln -sfn "$DOTS/syncthing/stignore" "$ign" || FAILED+=("~/$d/.stignore link")
     fi
   done
   if ((DRY)); then
@@ -607,8 +786,13 @@ sync_setup() { # Syncthing: same folders, same folder IDs on every machine
     syncthing cli show system >/dev/null 2>&1 && break
     sleep 1
   done
+  local have
+  if ! have=$(syncthing cli config folders list 2>/dev/null); then
+    FAILED+=("syncthing isn't responding, so no folders were added (re-run later)")
+    return 0
+  fi
   for d in "${SYNC_DIRS[@]}"; do
-    syncthing cli config folders list 2>/dev/null | grep -qx "$d" && continue
+    grep -qxF -- "$d" <<<"$have" && continue
     syncthing cli config folders add --id "$d" --label "$d" --path "$HOME/$d" ||
       FAILED+=("syncthing folder $d")
   done
@@ -652,51 +836,84 @@ bash_to_zsh() { # can't change the login shell: have interactive bash hand over 
   printf '\n%s\nif [[ $- == *i* && -x %q && "$(cat /proc/$PPID/comm 2>/dev/null)" != zsh ]]; then\n  SHELL=%q exec %q -l\nfi\n' \
     "$mark" "$1" "$1" "$1" >>"$rc"
   NOTES+=("~/.bashrc now hands interactive shells to zsh (login shell is still bash)")
+  if ! grep -qx "$zsh" /etc/shells; then
+    run sudo sh -c "echo '$zsh' >> /etc/shells" || {
+      FAILED+=("login shell (add $zsh to /etc/shells, then: chsh -s $zsh)")
+      return 0
+    }
+  fi
+  run chsh -s "$zsh" || FAILED+=("login shell (run: chsh -s $zsh)")
+}
+
+ssh_dir_in_repo() { # does ~/.ssh resolve into the repo? (then keys would land in git)
+  local r
+  r=$(cd -P "$HOME/.ssh" 2>/dev/null && pwd) || return 1
+  [[ $r == "$DOTS" || $r == "$DOTS/"* ]]
 }
 
 git_setup() {
   local key="$HOME/.ssh/id_ed25519" email
   email=$(git config --global user.email || echo "me@dnex.dev")
-  if [[ ! -f $key.pub ]] && ask "No SSH key found. Create one (for GitHub + commit signing)?"; then
-    run mkdir -p "$HOME/.ssh"
-    run ssh-keygen -t ed25519 -C "$email" -f "$key"
-    NOTES+=("add ~/.ssh/id_ed25519.pub to GitHub as BOTH an Authentication and a Signing key")
+  if ssh_dir_in_repo; then
+    FAILED+=("~/.ssh points into the dotfiles repo: refusing to write keys there (run ./install.sh --link)")
+    return 0
   fi
+  if [[ ! -f $key.pub ]] && ask "No SSH key found. Create one (for GitHub + commit signing)?"; then
+    if [[ -d $HOME/.ssh ]] || run mkdir -m 700 "$HOME/.ssh"; then
+      if run ssh-keygen -t ed25519 -C "$email" -f "$key"; then
+        NOTES+=("add ~/.ssh/id_ed25519.pub to GitHub as BOTH an Authentication and a Signing key")
+      else FAILED+=("ssh key (run: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519)"); fi
+    else FAILED+=("~/.ssh (couldn't create it)"); fi
+  fi
+  # only touch the keys we own: anything else in ~/.gitconfig.local or allowed_signers
+  # (other machines' signing keys, includeIf, aliases) is kept
   say "writing ~/.gitconfig.local"
   if ((DRY)); then
     echo "   [dry] signing config for $key.pub"
     return 0
   fi
+  local cfg=(git config --file "$HOME/.gitconfig.local") signers=$HOME/.ssh/allowed_signers line
   if [[ -f $key.pub ]]; then
-    printf '[user]\n\tsigningkey = %s\n[gpg "ssh"]\n\tallowedSignersFile = %s\n' \
-      "$key.pub" "$HOME/.ssh/allowed_signers" >"$HOME/.gitconfig.local"
-    echo "$email $(cat "$key.pub")" >"$HOME/.ssh/allowed_signers"
+    line="$email $(cat "$key.pub")"
+    "${cfg[@]}" user.signingkey "$key.pub" &&
+      "${cfg[@]}" gpg.ssh.allowedSignersFile "$signers" &&
+      { "${cfg[@]}" --unset commit.gpgsign || [[ $? == 5 ]]; } && # 5: wasn't set
+      { grep -qxF -- "$line" "$signers" 2>/dev/null || echo "$line" >>"$signers"; } ||
+      FAILED+=("git signing config (~/.gitconfig.local / ~/.ssh/allowed_signers)")
   else
-    printf '[commit]\n\tgpgsign = false\n' >"$HOME/.gitconfig.local"
+    "${cfg[@]}" commit.gpgsign false || FAILED+=("git config (~/.gitconfig.local)")
     NOTES+=("commit signing is off until you create an SSH key and re-run ./install.sh")
   fi
 }
 
-connect_setup() { # join the tailnet, then hook this machine up to the Legion (ssh alias: us)
-  if [[ $OS != mac ]] && has tailscale && ! tailscale status >/dev/null 2>&1; then
-    say "joining the tailnet (open the link it prints)"
-    run sudo tailscale up || FAILED+=("tailscale (run: sudo tailscale up)")
-  fi
-  [[ $(uname -n) == us ]] && return 0 # this is the Legion
+# Legion (M10). States: batch-ok -> interactive-ok -> key copied + verified -> unreachable.
+# A failed BatchMode probe only means "no unlocked key": it isn't treated as unreachable.
+connect_setup() { # hook this machine up to the Legion (ssh alias: us)
+  tailnet_up # no-op on Arch (arch_system did it) and macOS (the app does it)
+  [[ $(short_host) == us ]] && return 0 # this is the Legion
+  local pair=("$DOTS/syncthing/pair.sh" us)
   if ((DRY)); then
-    echo "   [dry] ssh-copy-id us"
-    echo "   [dry] $DOTS/syncthing/pair.sh us"
+    echo "   [dry] check ssh us (ssh-copy-id us if needed)"
+    echo "   [dry] ${pair[*]}"
     return 0
   fi
-  if ! ssh -o BatchMode=yes -o ConnectTimeout=5 us true 2>/dev/null &&
-    [[ -f $HOME/.ssh/id_ed25519.pub ]] &&
-    ask "Copy your ssh key to the Legion (asks for its password once)?"; then
-    say "ssh-copy-id us"
-    ssh-copy-id us || FAILED+=("ssh key to Legion (is it online? run: ssh-copy-id us)")
+  probe() { ssh -o ConnectTimeout=5 -o PreferredAuthentications=publickey "$@" us true; }
+  local ok=0
+  if probe -o BatchMode=yes 2>/dev/null; then
+    ok=1
+  else
+    say "checking ssh to the Legion (may ask for your key's passphrase)"
+    if probe; then
+      ok=1
+    elif [[ -f $HOME/.ssh/id_ed25519.pub ]] && ask "Copy your ssh key to the Legion (asks for its password once)?"; then
+      say "ssh-copy-id us"
+      if ssh-copy-id -o ConnectTimeout=5 us && probe; then ok=1; fi
+    fi
   fi
-  if has syncthing && ssh -o BatchMode=yes -o ConnectTimeout=5 us true 2>/dev/null &&
-    ask "Pair Syncthing with the Legion?"; then
-    "$DOTS/syncthing/pair.sh" us || FAILED+=("syncthing pairing (run: $DOTS/syncthing/pair.sh us)")
+  if ((!ok)); then
+    FAILED+=("Legion (us) not reachable over ssh; when it is: ssh-copy-id us && ${pair[*]}")
+  elif has syncthing && ask "Pair Syncthing with the Legion?"; then
+    "${pair[@]}" || FAILED+=("syncthing pairing (run: ${pair[*]})")
   fi
 }
 
@@ -722,6 +939,8 @@ desktop_settings() { # gsettings that GTK/portals read on wayland (fonts, icons,
   done
 }
 
+# ---------- main (M2) ----------
+
 if ((DRY)); then say "DRY RUN: nothing will change"; fi
 case $OS in
 arch) arch_setup ;;
@@ -729,8 +948,7 @@ debian) debian_setup ;;
 mac) mac_setup ;;
 *) warn "unsupported OS ($OS): only linking configs" ;;
 esac
-link_configs
-if [[ -d $HOME/.ssh ]]; then run chmod 700 "$HOME/.ssh"; fi
+link_configs || FAILED+=("linking configs (fix the conflicts above, then: ./install.sh --link)")
 shell_setup
 if ((ME)); then sync_setup; fi
 if [[ $OS == arch || $OS == linux ]]; then desktop_settings; fi
@@ -738,14 +956,8 @@ if [[ $OS == arch ]]; then
   arch_system
   NOTES+=("reboot (or log out) to land in the greeter")
 fi
-git_setup
-if ((ME)); then connect_setup; fi
-
-echo
-say "done"
-for n in ${NOTES[@]+"${NOTES[@]}"}; do echo "  - $n"; done
-if ((${#FAILED[@]})); then
-  warn "these didn't install:"
-  for f in ${FAILED[@]+"${FAILED[@]}"}; do echo "  - $f"; done
+if ((ME)); then
+  git_setup
+  connect_setup
 fi
-exit 0
+summary
