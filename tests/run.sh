@@ -563,11 +563,11 @@ t_S4_new_folders_get_30_day_versioning_unless_already_set() {
 t_S5_ignore_list_keeps_per_machine_state_out() {
   local f=$T/dots/syncthing/stignore p
   for p in /.local/state/syncthing /.config/syncthing /.ssh /.gnupg /.local/share/keyrings \
-    '/dotfiles/*' /.cache /.local/bin /.local/share/nvim /.zen /.config/zen /.mozilla /.config/mozilla /.config/evolution /.espressif /esp/esp-idf /.local/mamba /yay /.sbt /.config/dconf /.zsh_history node_modules target; do
+    '/dotfiles/*' /.cache /.local/bin /.local/share/nvim /.zen /.config/zen /.mozilla /.config/mozilla /.config/evolution /.config/thunderbird /.thunderbird '/.config/vesktop/*' '/.config/VSCodium/*' '/.config/VSCodium/User/*' '/.config/*/Singleton*' /.vscode-oss /.espressif /esp/esp-idf /.local/mamba /yay /.sbt /.config/dconf /.zsh_history node_modules target; do
     grep -qxF -- "$p" "$f" || fail "stignore doesn't ignore $p" || return 1
   done
   # these must NOT be ignored: they are what the user wants mirrored
-  for p in /code /Documents /Downloads /Projects /Pictures /notes /.config/thunderbird /.thunderbird; do
+  for p in /code /Documents /Downloads /Projects /Pictures /notes; do
     ! grep -qxF -- "$p" "$f" || fail "stignore ignores $p" || return 1
   done
 }
