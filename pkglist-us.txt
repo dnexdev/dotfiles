@@ -84,9 +84,11 @@ tmux
 trash-cli
 ttf-fira-sans
 ttf-jetbrains-mono-nerd
+typst
 unzip
 vulkan-intel
 wireplumber
+wl-clipboard
 wpa_supplicant
 xdg-desktop-portal-gnome
 xdg-desktop-portal-gtk
