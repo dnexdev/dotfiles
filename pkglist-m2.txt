@@ -107,6 +107,7 @@ stow
 strace
 sudo
 swaybg
+syncthing
 system-config-printer
 tailscale
 tesseract
