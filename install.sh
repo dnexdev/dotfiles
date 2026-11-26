@@ -832,6 +832,36 @@ sync_setup() { # Syncthing (M8): same folders, same folder IDs on every machine
         FAILED+=("syncthing versioning for $id (set it in the web UI)")
     fi
   done
+  syncthing_analyze
+}
+
+# Syncthing 2.x keeps its index in SQLite without planner statistics. Then the query that
+# looks for blocks it can copy locally walks every local file for every block: measured on
+# 359k files at 340 ms per block, i.e. 0.7 files/s. ANALYZE (once the database holds data;
+# on an empty one it records nothing useful) makes it 0.2 ms: 232 files/s. The statistics
+# are stored in the database, so this runs once per database. See docs/state-machines.md M8.
+syncthing_analyze() {
+  has sqlite3 || return 0
+  local dir db todo=() n
+  for dir in "$HOME/.local/state/syncthing/index-v2" "$HOME/Library/Application Support/Syncthing/index-v2"; do
+    for db in "$dir"/folder.*.db; do
+      [[ -f $db ]] || continue
+      sqlite3 -readonly "file:$db?mode=ro" "SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'" 2>/dev/null | grep -q 1 && continue
+      n=$(sqlite3 -readonly "file:$db?mode=ro" "SELECT count(*) FROM files" 2>/dev/null || echo 0)
+      ((n >= 10000)) && todo+=("$db")
+    done
+  done
+  ((${#todo[@]})) || return 0
+  say "syncthing: adding database statistics (fixes very slow syncing of many files)"
+  if ((DRY)); then
+    echo "   [dry] stop syncthing, sqlite3 ANALYZE ${todo[*]}, start syncthing"
+    return 0
+  fi
+  local stop=(systemctl --user stop syncthing.service) start=(systemctl --user start syncthing.service)
+  if [[ $OS == mac ]]; then stop=(brew services stop syncthing) start=(brew services start syncthing); fi
+  "${stop[@]}" >/dev/null 2>&1 || true
+  for db in "${todo[@]}"; do sqlite3 "$db" "ANALYZE;" || FAILED+=("syncthing ANALYZE $db"); done
+  "${start[@]}" >/dev/null 2>&1 || FAILED+=("syncthing didn't restart: ${start[*]}")
 }
 
 login_shell() { # what's actually set, not $SHELL (that only updates after re-login)

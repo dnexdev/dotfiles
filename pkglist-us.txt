@@ -64,6 +64,7 @@ pipewire
 pipewire-alsa
 pipewire-jack
 pipewire-pulse
+plantuml
 power-profiles-daemon
 qt6-multimedia-ffmpeg
 qt6ct

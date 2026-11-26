@@ -21,7 +21,7 @@ SSHD=$(command -v sshd || ls /usr/sbin/sshd 2>/dev/null || true)
 
 REAL=(bash sh env cat cp mv rm ln mkdir rmdir chmod readlink realpath basename dirname find
   grep sed awk cut tr sort head tail tee mktemp date sleep touch wc perl stow diff git seq
-  paste id)
+  paste id sqlite3)
 STUBS=(uname sudo pacman yay makepkg curl systemctl loginctl chsh getent ssh ssh-copy-id
   ssh-keygen tailscale syncthing sshd dscl)
 
@@ -74,7 +74,7 @@ case $1 in
   grep -vhE '^[[:space:]]*(#|$)' "$STUBROOT/dots/packages/arch.txt"
   echo git; echo stow; echo base-devel ;;
 -Qqen) echo pkg-a ;;
--Qqem) echo aur-b ;;
+-Qqem) [[ -f $STUBROOT/no-aur ]] && exit 1; echo aur-b ;; # (real pacman: rc 1 when empty)
 esac
 EOF
   behave getent <<'EOF'
@@ -588,6 +588,31 @@ t_S7_private_and_docs_sync_but_stay_out_of_git() {
     fail "a user name other than nex is in the public ssh config"
 }
 
+# make_st_db NAME ROWS: a Syncthing-like folder database with ROWS local files
+make_st_db() {
+  local d=$T/home/.local/state/syncthing/index-v2
+  mkdir -p "$d"
+  sqlite3 "$d/$1" "CREATE TABLE files (device_idx INTEGER, name_idx INTEGER, blocklist_hash BLOB);
+    CREATE INDEX files_dev ON files (device_idx, name_idx);
+    WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $2)
+    INSERT INTO files SELECT 1, i, NULL FROM n;"
+}
+has_stats() { sqlite3 "$T/home/.local/state/syncthing/index-v2/$1" "SELECT count(*) FROM sqlite_master WHERE name = 'sqlite_stat1'"; }
+
+t_S8_large_syncthing_database_gets_statistics_once() {
+  command -v sqlite3 >/dev/null || { skip "no sqlite3"; return 0; }
+  make_st_db folder.big.db 12000
+  make_st_db folder.small.db 50
+  run_install -y
+  rc_is 0 || return 1
+  [[ $(has_stats folder.big.db) == 1 ]] || fail "big database wasn't analyzed" || return 1
+  [[ $(has_stats folder.small.db) == 0 ]] || fail "small database was analyzed (stats would be useless)" || return 1
+  log_has '^systemctl --user stop syncthing' && log_has '^systemctl --user start syncthing' || return 1
+  : >"$T/log" # second run: nothing left to do, so Syncthing must not be stopped again
+  run_install -y
+  log_lacks '^systemctl --user stop syncthing'
+}
+
 t_S6_pair_shares_the_home_folder() {
   printf '~\n' >"$T/dots/syncthing/folders"
   local_has_folders home
@@ -609,6 +634,14 @@ t_R1_snapshot_never_writes_through_a_symlink() {
     fail "pkglist-m2.txt not replaced by a regular file" || return 1
   [[ $(cat "$T/dots/aur-m2.txt") == aur-b ]] || fail "aur-m2.txt wrong" || return 1
   [[ -z $(find "$T/dots" -maxdepth 1 -name '.snapshot.*') ]] || fail "temp file left behind"
+}
+
+t_R1_snapshot_with_no_aur_packages_writes_an_empty_list() {
+  rm -f "$T/dots/pkglist-m2.txt" "$T/dots/aur-m2.txt"
+  : >"$T/no-aur"
+  env -i PATH="$T/bin:$T/sys" STUBROOT="$T" TMPDIR="$T/tmp" FAKE_HOST=m2 \
+    sh "$T/dots/system/pkglist-snapshot" "$T/dots" >"$T/out" 2>&1 || fail "snapshot failed: $(cat "$T/out")" || return 1
+  [[ -f $T/dots/aur-m2.txt && ! -s $T/dots/aur-m2.txt ]] || fail "aur-m2.txt should exist and be empty"
 }
 
 t_R1_hook_runs_the_snapshot_as_the_user() {

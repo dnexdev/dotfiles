@@ -22,7 +22,8 @@ tmp=""
 trap 'rm -f "$tmp"' EXIT
 for kind in pkglist aur; do
   tmp=$(mktemp "$d/.snapshot.XXXXXX")
-  if [ "$kind" = pkglist ]; then pacman -Qqen >"$tmp"; else pacman -Qqem >"$tmp"; fi
+  # pacman -Qm exits 1 when there are no foreign packages: that is an empty list, not an error
+  if [ "$kind" = pkglist ]; then pacman -Qqen >"$tmp"; else pacman -Qqem >"$tmp" || [ $? -eq 1 ]; fi
   mv -f "$tmp" "$d/$kind-$h.txt"
   tmp=""
 done
